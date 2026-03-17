@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mandarin → English Recorder</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Mandarin → English</h1>
+      <p class="subtitle">Record voice, get transcription & translation</p>
+    </header>
+
+    <section class="record-section">
+      <div class="record-controls">
+        <button type="button" id="btnRecord" class="btn btn-record" aria-label="Start recording">Record</button>
+        <button type="button" id="btnStop" class="btn btn-stop" disabled aria-label="Stop recording">Stop</button>
+      </div>
+      <p id="recordStatus" class="status" aria-live="polite">Click Record and speak in Mandarin.</p>
+      <div class="results" id="results" hidden>
+        <div class="result-block">
+          <label>Transcription (Mandarin)</label>
+          <p id="transcription" class="text-block"></p>
+        </div>
+        <div class="result-block">
+          <label>Translation (English)</label>
+          <p id="translation" class="text-block"></p>
+        </div>
+        <div class="result-actions">
+          <button type="button" id="btnSave" class="btn btn-save">Save with timestamp</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="saved-section">
+      <h2>Saved recordings</h2>
+      <ul id="savedList" class="saved-list" aria-label="List of saved recordings"></ul>
+    </section>
+  </div>
+
+  <div id="modal" class="modal" hidden aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-content">
+      <h2 id="modalTitle">Recording</h2>
+      <p class="modal-meta" id="modalMeta"></p>
+      <div class="modal-audio">
+        <audio id="modalPlayer" controls></audio>
+      </div>
+      <div class="result-block">
+        <label>Transcription (Mandarin)</label>
+        <p id="modalTranscription" class="text-block"></p>
+      </div>
+      <div class="result-block">
+        <label>Translation (English)</label>
+        <p id="modalTranslation" class="text-block"></p>
+      </div>
+      <button type="button" id="btnCloseModal" class="btn">Close</button>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Env (never commit Supabase keys)
+.env
+server/.env
+*.env.local
+.env.*.local
+
+# Build
+client/dist/
+
+# Uploads (server stores audio/photo here; optional to ignore if you want to backup)
+server/uploads/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
