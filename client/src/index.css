@@ -11,8 +11,8 @@
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: #f0f2f5;
+  font-family: 'Nunito', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: radial-gradient(circle at top left, #ecfeff, #f0f2f5);
   color: #1f2937;
   min-height: 100vh;
   min-height: 100dvh;
@@ -268,7 +268,11 @@ body {
   color: #1f2937;
   font-size: 0.875rem;
   cursor: pointer;
-  transition: background var(--transition-btn), border-color var(--transition-btn), box-shadow var(--transition-btn), transform var(--transition-btn);
+  transition:
+    background var(--transition-btn),
+    border-color var(--transition-btn),
+    box-shadow var(--transition-btn),
+    transform var(--transition-btn);
   display: block;
   min-height: 80px;
   box-sizing: border-box;
@@ -276,14 +280,15 @@ body {
 }
 
 .saved-card:hover {
-  background: #f8fafc;
+  background: radial-gradient(circle at 0% 0%, #eff6ff, #ffffff);
   border-color: #2563eb;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.16);
+  transform: translateY(-2px);
 }
 
 .saved-card:active {
   background: #f1f5f9;
-  transform: scale(0.99);
+  transform: translateY(0) scale(0.99);
 }
 
 .card-row {
@@ -390,6 +395,24 @@ body {
   z-index: 100;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.modal-content,
+.modal-recording,
+.modal-import,
+.modal-detail {
+  animation: modal-pop 0.18s ease-out;
+}
+
+@keyframes modal-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* Non-recording modals behave like bottom sheets on small screens */
@@ -1039,7 +1062,7 @@ body {
   overflow-y: auto;
 }
 .modal-onboarding .onboarding-list-empty {
-  margin: 0;
+  margin: 0.75rem 0 0;
   color: var(--text-muted);
   font-size: 0.9375rem;
 }
@@ -1067,7 +1090,6 @@ body {
   min-width: 0;
   flex: 1;
   padding: 0.5rem 0.75rem;
-  border-right: 1px solid #e2e8f0;
 }
 .modal-onboarding .onboarding-family-chip {
   flex-shrink: 0;
@@ -1108,12 +1130,12 @@ body {
   cursor: not-allowed;
 }
 .btn-danger-small {
-  background: #dc2626;
-  color: #fff;
-  border: none;
+  background: transparent;
+  color: #dc2626;
+  border: 1px solid #fecaca;
 }
 .btn-danger-small:hover {
-  background: #b91c1c;
+  background: #fee2e2;
 }
 .btn-secondary-small {
   background: transparent;
@@ -1164,6 +1186,45 @@ body {
   margin-top: 0.25rem;
 }
 
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%) translateY(16px);
+  background: rgba(15, 23, 42, 0.95);
+  color: #f9fafb;
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.45);
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0;
+  animation: toast-pop 0.25s ease-out forwards, toast-fadeout 0.25s ease-in 2.25s forwards;
+}
+
+@keyframes toast-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-fadeout {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px) scale(0.98);
+  }
+}
+
 .import-status {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
@@ -1184,13 +1245,14 @@ body {
 }
 
 .btn-record {
-  background: #dc2626;
+  background: radial-gradient(circle at 30% 20%, #fee2e2, #dc2626);
   color: #fff;
 }
 
 .btn-record:hover:not(:disabled) {
-  background: #b91c1c;
-  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
+  background: radial-gradient(circle at 30% 20%, #fee2e2, #b91c1c);
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4);
+  transform: translateY(-1px) scale(1.02);
 }
 
 .btn-stop {
@@ -1203,13 +1265,14 @@ body {
 }
 
 .btn-save {
-  background: #059669;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
   color: #fff;
 }
 
 .btn-save:hover:not(:disabled) {
-  background: #047857;
-  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+  background: linear-gradient(135deg, #16a34a, #15803d);
+  box-shadow: 0 4px 14px rgba(22, 163, 74, 0.45);
+  transform: translateY(-1px) scale(1.01);
 }
 
 .btn-secondary {
@@ -1401,6 +1464,19 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   padding: 0.25rem;
   z-index: 10;
+  transform-origin: top right;
+  animation: dropdown-pop 0.12s ease-out;
+}
+
+@keyframes dropdown-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .modal-detail-menu-item {
@@ -1536,6 +1612,7 @@ body {
   margin: 0;
   border: none;
   background: transparent;
+  font-family: inherit;
   font-size: 0.9375rem;
   color: #475569;
   line-height: 1.5;

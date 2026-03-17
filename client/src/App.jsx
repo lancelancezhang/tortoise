@@ -105,8 +105,10 @@ export default function App() {
   const moreMenuRef = useRef(null);
   const [optionsModalOpen, setOptionsModalOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [addFamilyModalOpen, setAddFamilyModalOpen] = useState(false);
   const [editingFamilyId, setEditingFamilyId] = useState(null);
   const [confirmDeleteFamilyId, setConfirmDeleteFamilyId] = useState(null);
+  const [toastMessage, setToastMessage] = useState('');
   const [spokenLanguage, setSpokenLanguage] = useState(() => {
     try {
       return localStorage.getItem('spokenLanguage') || 'mandarin';
@@ -115,6 +117,14 @@ export default function App() {
     }
   });
   const spokenLanguageRef = useRef(spokenLanguage);
+  const [uiLanguage, setUiLanguage] = useState(() => {
+    try {
+      return localStorage.getItem('uiLanguage') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
+  const isKo = uiLanguage === 'ko';
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -156,11 +166,30 @@ export default function App() {
   }, [loadFamilyMembers]);
 
   useEffect(() => {
+    if (!familySlug) return;
+    try {
+      const key = `family_onboarded_${familySlug}`;
+      if (familyMembers.length === 0 && !localStorage.getItem(key)) {
+        setOnboardingOpen(true);
+        localStorage.setItem(key, '1');
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [familySlug, familyMembers]);
+
+  useEffect(() => {
     spokenLanguageRef.current = spokenLanguage;
     try {
       localStorage.setItem('spokenLanguage', spokenLanguage);
     } catch {}
   }, [spokenLanguage]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('uiLanguage', uiLanguage);
+    } catch {}
+  }, [uiLanguage]);
 
   const startRecording = async () => {
     currentTranscriptRef.current = '';
@@ -547,7 +576,7 @@ export default function App() {
       return;
     }
     try {
-      await addFamilyMember(familySlug, {
+      const added = await addFamilyMember(familySlug, {
         name: nameTrimmed,
         relationship: relationshipTrimmed,
         age: newMemberAge.trim() || undefined,
@@ -558,6 +587,8 @@ export default function App() {
       setNewMemberAge('');
       setNewMemberBirthday('');
       loadFamilyMembers();
+      setToastMessage(`Added ${added.name}`);
+      setTimeout(() => setToastMessage(''), 2500);
     } catch {
       // could set error state
     }
@@ -569,6 +600,7 @@ export default function App() {
     setNewMemberRelationship(fm.relationship || '');
     setNewMemberAge(fm.age != null ? String(fm.age) : '');
     setNewMemberBirthday(fm.birthday || '');
+    setAddFamilyModalOpen(true);
   };
 
   const cancelEditFamilyMember = () => {
@@ -577,6 +609,7 @@ export default function App() {
     setNewMemberRelationship('');
     setNewMemberAge('');
     setNewMemberBirthday('');
+    setAddFamilyModalOpen(false);
   };
 
   const handleUpdateFamilyMember = async () => {
@@ -676,7 +709,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>TortoiseAI</h1>
+        <h1>🐢 TortoiseAI</h1>
         <div className="app-header-actions">
           <button
             type="button"
@@ -686,7 +719,7 @@ export default function App() {
             }}
             aria-label="Record story"
           >
-            Record story
+            {isKo ? '이야기 녹음하기' : 'Record story'}
           </button>
           <div className="header-more-wrap" ref={moreMenuRef}>
             <button
@@ -697,8 +730,7 @@ export default function App() {
               aria-expanded={moreMenuOpen}
               aria-haspopup="true"
             >
-              More
-              <svg className="header-more-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 9l6 6 6-6" /></svg>
+              ⋮
             </button>
             {moreMenuOpen && (
               <div className="header-more-dropdown" role="menu">
@@ -717,18 +749,7 @@ export default function App() {
                     setImportFamilyMemberId('');
                   }}
                 >
-                  Import story
-                </button>
-                <button
-                  type="button"
-                  className="header-more-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setMoreMenuOpen(false);
-                    navigate('/');
-                  }}
-                >
-                  Home
+                  {isKo ? '이야기 가져오기' : 'Import story'}
                 </button>
                 <button
                   type="button"
@@ -739,7 +760,7 @@ export default function App() {
                     setOptionsModalOpen(true);
                   }}
                 >
-                  Options
+                  {isKo ? '언어 변경' : 'Change language'}
                 </button>
                 <button
                   type="button"
@@ -757,7 +778,7 @@ export default function App() {
                     setConfirmDeleteFamilyId(null);
                   }}
                 >
-                  Manage family
+                  {isKo ? '가족 관리' : 'Manage family'}
                 </button>
               </div>
             )}
@@ -775,7 +796,7 @@ export default function App() {
         >
           <div className="modal-content modal-import">
             <header className="modal-import-header">
-              <h2 id="optionsModalTitle">Options</h2>
+              <h2 id="optionsModalTitle">{isKo ? '언어 설정' : 'Change language'}</h2>
               <button
                 type="button"
                 className="modal-close-x"
@@ -787,18 +808,37 @@ export default function App() {
             </header>
             <div className="import-form">
               <div className="result-section">
-                <label className="result-label" htmlFor="options-spoken-language">Spoken language</label>
+                <label className="result-label" htmlFor="options-spoken-language">
+                  {isKo ? '녹음할 언어' : 'Spoken language'}
+                </label>
                 <select
                   id="options-spoken-language"
                   className="input-field"
                   value={spokenLanguage}
                   onChange={(e) => setSpokenLanguage(e.target.value)}
-                  aria-label="Language you will speak when recording"
+                  aria-label={isKo ? '녹음할 때 말할 언어' : 'Language you will speak when recording'}
                 >
-                  <option value="mandarin">Mandarin</option>
-                  <option value="korean">Korean</option>
+                  <option value="mandarin">{isKo ? '중국어' : 'Mandarin'}</option>
+                  <option value="korean">{isKo ? '한국어' : 'Korean'}</option>
                 </select>
-                <p className="input-hint">Stories will be transcribed and translated to English.</p>
+                <p className="input-hint">
+                  {isKo ? '이야기는 받아 적은 후 영어로 번역돼요.' : 'Stories will be transcribed and translated to English.'}
+                </p>
+              </div>
+              <div className="result-section">
+                <label className="result-label" htmlFor="options-ui-language">
+                  {isKo ? '앱 언어' : 'Interface language'}
+                </label>
+                <select
+                  id="options-ui-language"
+                  className="input-field"
+                  value={uiLanguage}
+                  onChange={(e) => setUiLanguage(e.target.value)}
+                  aria-label={isKo ? '앱 화면 언어' : 'Language of the app interface'}
+                >
+                  <option value="en">English</option>
+                  <option value="ko">한국어</option>
+                </select>
               </div>
             </div>
           </div>
@@ -815,7 +855,7 @@ export default function App() {
         >
           <div className="modal-content modal-import modal-onboarding">
             <header className="modal-import-header">
-              <h2 id="onboardingTitle">Manage family</h2>
+              <h2 id="onboardingTitle">{isKo ? '가족 관리' : 'Manage family'}</h2>
               <button
                 type="button"
                 className="modal-close-x"
@@ -827,7 +867,9 @@ export default function App() {
             </header>
             <div className="onboarding-list">
               {familyMembers.length === 0 ? (
-                <p className="onboarding-list-empty">No family members yet. Add them below.</p>
+                <p className="onboarding-list-empty">
+                  {isKo ? '아직 추가된 가족이 없어요' : 'No family members yet'}
+                </p>
               ) : (
                 <ul className="onboarding-family-list" aria-label="Family and story authors">
                   {familyMembers.map((fm) => (
@@ -842,14 +884,16 @@ export default function App() {
                       <div className="onboarding-family-actions">
                         {confirmDeleteFamilyId === fm.id ? (
                           <>
-                            <span className="onboarding-delete-prompt">Delete?</span>
+                            <span className="onboarding-delete-prompt">
+                              {isKo ? '삭제할까요?' : 'Delete?'}
+                            </span>
                             <button
                               type="button"
                               className="btn btn-danger-small"
                               onClick={() => handleDeleteFamilyMember(fm.id)}
                               aria-label="Confirm delete"
                             >
-                              Yes
+                              {isKo ? '네' : 'Yes'}
                             </button>
                             <button
                               type="button"
@@ -857,7 +901,7 @@ export default function App() {
                               onClick={() => setConfirmDeleteFamilyId(null)}
                               aria-label="Cancel delete"
                             >
-                              No
+                              {isKo ? '아니요' : 'No'}
                             </button>
                           </>
                         ) : (
@@ -869,7 +913,7 @@ export default function App() {
                               disabled={editingFamilyId != null && editingFamilyId !== fm.id}
                               aria-label={`Edit ${fm.name}`}
                             >
-                              Edit
+                              ✏️
                             </button>
                             <button
                               type="button"
@@ -877,7 +921,7 @@ export default function App() {
                               onClick={() => setConfirmDeleteFamilyId(fm.id)}
                               aria-label={`Delete ${fm.name}`}
                             >
-                              Delete
+                              🗑️
                             </button>
                           </>
                         )}
@@ -888,9 +932,155 @@ export default function App() {
               )}
             </div>
             <div className="import-form onboarding-form">
-              {editingFamilyId ? (
-                <p className="onboarding-edit-hint">Editing family member</p>
-              ) : null}
+              <div className="modal-detail-actions">
+                <button
+                  type="button"
+                  className="btn btn-save"
+                  onClick={() => {
+                    setEditingFamilyId(null);
+                    setNewMemberName('');
+                    setNewMemberRelationship('');
+                    setNewMemberAge('');
+                    setNewMemberBirthday('');
+                    setAddFamilyModalOpen(true);
+                  }}
+                >
+                  Add family member
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => requestCloseWithDiscardConfirm(hasOnboardingDirty(), closeOnboardingModal)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recordModeModalOpen && (
+        <div
+          className="modal modal-recording-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="recordModeTitle"
+          onClick={(e) => e.target === e.currentTarget && setRecordModeModalOpen(false)}
+        >
+          <div className="modal-content modal-mode">
+            <h2 id="recordModeTitle" className="modal-prompt-title">
+              {isKo ? '어떻게 녹음할까요?' : 'How would you like to record?'}
+            </h2>
+            <div className="modal-mode-options">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setRecordMode('voice');
+                  setRecordingPrompt(null);
+                  setRecordingSuggestedTitle(null);
+                  recordingSuggestedTitleRef.current = null;
+                  setStatus('');
+                  setStatusClass('');
+                  setShowResults(false);
+                  setTranscript('');
+                  setTranslation('');
+                  setAudioBlob(null);
+                  setRecordingDuration(0);
+                  setRecordTitle('');
+                  setRecordDescription('');
+                  setRecordStoryDate('');
+                  setRecordFamilyMemberId('');
+                  setRecordPhotoFile(null);
+                  setRecordPhotoPreview(null);
+                  setRecordModeModalOpen(false);
+                  setModalRecordingOpen(true);
+                }}
+              >
+                {isKo ? '음성만' : 'Voice-only'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setRecordMode('photo');
+                  setRecordingPrompt(null);
+                  setRecordingSuggestedTitle(null);
+                  recordingSuggestedTitleRef.current = null;
+                  setStatus('');
+                  setStatusClass('');
+                  setShowResults(false);
+                  setTranscript('');
+                  setTranslation('');
+                  setAudioBlob(null);
+                  setRecordingDuration(0);
+                  setRecordTitle('');
+                  setRecordDescription('');
+                  setRecordStoryDate('');
+                  setRecordFamilyMemberId('');
+                  setRecordPhotoFile(null);
+                  setRecordPhotoPreview(null);
+                  setRecordModeModalOpen(false);
+                  setModalRecordingOpen(true);
+                }}
+              >
+                {isKo ? '사진 + 음성' : 'Photo + voice'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setRecordMode('voice');
+                  setRecordingPrompt(null);
+                  setRecordingSuggestedTitle(null);
+                  recordingSuggestedTitleRef.current = null;
+                  setStatus('');
+                  setStatusClass('');
+                  setShowResults(false);
+                  setTranscript('');
+                  setTranslation('');
+                  setAudioBlob(null);
+                  setRecordingDuration(0);
+                  setRecordTitle('');
+                  setRecordDescription('');
+                  setRecordStoryDate('');
+                  setRecordFamilyMemberId('');
+                  setRecordPhotoFile(null);
+                  setRecordPhotoPreview(null);
+                  setRecordModeModalOpen(false);
+                  setCurrentStoryPrompt(pickRandomPrompt());
+                  setPromptModalOpen(true);
+                }}
+              >
+                {isKo ? '이야기 질문' : 'Story prompt'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addFamilyModalOpen && (
+        <div
+          className="modal modal-recording-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="addFamilyModalTitle"
+          onClick={(e) => e.target === e.currentTarget && requestCloseWithDiscardConfirm(hasOnboardingDirty(), cancelEditFamilyMember)}
+        >
+          <div className="modal-content modal-import">
+            <header className="modal-import-header">
+              <h2 id="addFamilyModalTitle">{editingFamilyId ? 'Edit family member' : 'Add family member'}</h2>
+              <button
+                type="button"
+                className="modal-close-x"
+                onClick={() => requestCloseWithDiscardConfirm(hasOnboardingDirty(), cancelEditFamilyMember)}
+                aria-label="Close"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </header>
+            <div className="import-form">
               <div className="result-section">
                 <label className="result-label" htmlFor="onboarding-name">Name</label>
                 <input
@@ -937,146 +1127,30 @@ export default function App() {
                 />
               </div>
               <div className="modal-detail-actions">
-                {editingFamilyId ? (
-                  <>
-                    <button
-                      type="button"
-                      className="btn btn-save"
-                      onClick={handleUpdateFamilyMember}
-                      disabled={!newMemberName.trim() || !newMemberRelationship.trim()}
-                    >
-                      Update
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={cancelEditFamilyMember}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="btn btn-save"
-                      onClick={handleAddFamilyMemberInOnboarding}
-                      disabled={!newMemberName.trim() || !newMemberRelationship.trim()}
-                    >
-                      Add
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => requestCloseWithDiscardConfirm(hasOnboardingDirty(), closeOnboardingModal)}
-                    >
-                      Done
-                    </button>
-                  </>
-                )}
+                <button
+                  type="button"
+                  className="btn btn-save"
+                  onClick={editingFamilyId ? handleUpdateFamilyMember : handleAddFamilyMemberInOnboarding}
+                  disabled={!newMemberName.trim() || !newMemberRelationship.trim()}
+                >
+                  {editingFamilyId ? 'Update' : 'Add'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => requestCloseWithDiscardConfirm(hasOnboardingDirty(), cancelEditFamilyMember)}
+                >
+                  Done
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {recordModeModalOpen && (
-        <div
-          className="modal modal-recording-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="recordModeTitle"
-          onClick={(e) => e.target === e.currentTarget && setRecordModeModalOpen(false)}
-        >
-          <div className="modal-content modal-mode">
-            <h2 id="recordModeTitle" className="modal-prompt-title">
-              How would you like to record?
-            </h2>
-            <div className="modal-mode-options">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setRecordMode('voice');
-                  setRecordingPrompt(null);
-                  setRecordingSuggestedTitle(null);
-                  recordingSuggestedTitleRef.current = null;
-                  setStatus('');
-                  setStatusClass('');
-                  setShowResults(false);
-                  setTranscript('');
-                  setTranslation('');
-                  setAudioBlob(null);
-                  setRecordingDuration(0);
-                  setRecordTitle('');
-                  setRecordDescription('');
-                  setRecordStoryDate('');
-                  setRecordFamilyMemberId('');
-                  setRecordPhotoFile(null);
-                  setRecordPhotoPreview(null);
-                  setRecordModeModalOpen(false);
-                  setModalRecordingOpen(true);
-                }}
-              >
-                Voice-only
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setRecordMode('photo');
-                  setRecordingPrompt(null);
-                  setRecordingSuggestedTitle(null);
-                  recordingSuggestedTitleRef.current = null;
-                  setStatus('');
-                  setStatusClass('');
-                  setShowResults(false);
-                  setTranscript('');
-                  setTranslation('');
-                  setAudioBlob(null);
-                  setRecordingDuration(0);
-                  setRecordTitle('');
-                  setRecordDescription('');
-                  setRecordStoryDate('');
-                  setRecordFamilyMemberId('');
-                  setRecordPhotoFile(null);
-                  setRecordPhotoPreview(null);
-                  setRecordModeModalOpen(false);
-                  setModalRecordingOpen(true);
-                }}
-              >
-                Photo + voice
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setRecordMode('voice');
-                  setRecordingPrompt(null);
-                  setRecordingSuggestedTitle(null);
-                  recordingSuggestedTitleRef.current = null;
-                  setStatus('');
-                  setStatusClass('');
-                  setShowResults(false);
-                  setTranscript('');
-                  setTranslation('');
-                  setAudioBlob(null);
-                  setRecordingDuration(0);
-                  setRecordTitle('');
-                  setRecordDescription('');
-                  setRecordStoryDate('');
-                  setRecordFamilyMemberId('');
-                  setRecordPhotoFile(null);
-                  setRecordPhotoPreview(null);
-                  setRecordModeModalOpen(false);
-                  setCurrentStoryPrompt(pickRandomPrompt());
-                  setPromptModalOpen(true);
-                }}
-              >
-                Story prompt
-              </button>
-            </div>
-          </div>
+      {toastMessage && (
+        <div className="toast">
+          {toastMessage}
         </div>
       )}
 
@@ -1240,7 +1314,9 @@ export default function App() {
                       </div>
 
                       <div className="recording-transcript-block">
-                        <span className="recording-transcript-label">Transcription</span>
+                    <span className="recording-transcript-label">
+                      {isKo ? '받아 적기' : 'Transcription'}
+                    </span>
                         <div className="recording-transcript">
                           {isRecording && transcript}
                           {showResults && !isRecording && transcript}
@@ -1327,19 +1403,23 @@ export default function App() {
                     </select>
                   </div>
                   <div className="result-section">
-                    <span className="result-label">Transcription</span>
+                    <span className="result-label">
+                      {isKo ? '받아 적기' : 'Transcription'}
+                    </span>
                     <p className="result-text">{transcript}</p>
                   </div>
                   <div className="result-section">
-                    <span className="result-label">Translation</span>
+                    <span className="result-label">
+                      {isKo ? '번역' : 'Translation'}
+                    </span>
                     <p className="result-text">{translation}</p>
                   </div>
                   <div className="result-actions result-actions-save-discard">
                     <button type="button" className="btn btn-save" onClick={handleSave}>
-                      Save
+                      {isKo ? '저장' : 'Save'}
                     </button>
                     <button type="button" className="btn btn-discard" onClick={() => setConfirmDiscardOpen(true)}>
-                      Discard
+                      {isKo ? '버리기' : 'Discard'}
                     </button>
                   </div>
                 </div>
@@ -1500,11 +1580,27 @@ export default function App() {
                     </button>
                     {detailMenuOpen && (
                       <div className="modal-detail-menu-dropdown" role="menu">
-                        <button type="button" className="modal-detail-menu-item" role="menuitem" onClick={() => { setDetailEditMode(true); setDetailMenuOpen(false); }}>
-                          Edit
+                        <button
+                          type="button"
+                          className="modal-detail-menu-item"
+                          role="menuitem"
+                          onClick={() => {
+                            setDetailEditMode(true);
+                            setDetailMenuOpen(false);
+                          }}
+                        >
+                          {isKo ? '편집' : 'Edit'}
                         </button>
-                        <button type="button" className="modal-detail-menu-item modal-detail-menu-item-danger" role="menuitem" onClick={() => { setConfirmDeleteId(modalRecord.id); setDetailMenuOpen(false); }}>
-                          Delete
+                        <button
+                          type="button"
+                          className="modal-detail-menu-item modal-detail-menu-item-danger"
+                          role="menuitem"
+                          onClick={() => {
+                            setConfirmDeleteId(modalRecord.id);
+                            setDetailMenuOpen(false);
+                          }}
+                        >
+                          {isKo ? '삭제' : 'Delete'}
                         </button>
                       </div>
                     )}
@@ -1530,24 +1626,28 @@ export default function App() {
                 {detailEditMode ? (
                   <>
                     <div className="modal-detail-when-row">
-                      <label className="modal-detail-when-label" htmlFor="modal-detail-date">When it happened</label>
+                      <label className="modal-detail-when-label" htmlFor="modal-detail-date">
+                        {isKo ? '언제 있었던 일인지' : 'When it happened'}
+                      </label>
                       <input
                         id="modal-detail-date"
                         type="date"
                         className="input-field input-field-date"
                         value={editStoryDate}
                         onChange={(e) => setEditStoryDate(e.target.value)}
-                        aria-label="When did this story happen"
+                        aria-label={isKo ? '언제 있었던 일인지' : 'When did this story happen'}
                       />
                     </div>
                     <div className="modal-detail-when-row">
-                      <label className="modal-detail-when-label" htmlFor="modal-detail-family">Story author</label>
+                      <label className="modal-detail-when-label" htmlFor="modal-detail-family">
+                        {isKo ? '이야기 주인공' : 'Story author'}
+                      </label>
                       <select
                         id="modal-detail-family"
                         className="input-field input-field-date"
                         value={editFamilyMemberId}
                         onChange={(e) => setEditFamilyMemberId(e.target.value)}
-                        aria-label="Story author"
+                        aria-label={isKo ? '이야기 주인공' : 'Story author'}
                       >
                         <option value="">None</option>
                         {familyMembers.map((fm) => (
@@ -1557,7 +1657,7 @@ export default function App() {
                     </div>
                     <textarea
                       className="modal-detail-description-input"
-                      placeholder="briefly describe your story"
+                      placeholder={isKo ? '이야기에 대해 간단히 적어주세요' : 'briefly describe your story'}
                       rows={3}
                       value={editDescription}
                       onChange={(e) => setEditDescription(e.target.value)}
@@ -1583,7 +1683,9 @@ export default function App() {
                     })()}
                     <div className="modal-detail-description-view">
                       {modalRecord.description?.trim() || (
-                        <span className="modal-detail-description-empty">No description</span>
+                    <span className="modal-detail-description-empty">
+                      {isKo ? '설명이 없어요' : 'No description'}
+                    </span>
                       )}
                     </div>
                   </>
@@ -1593,39 +1695,47 @@ export default function App() {
             {modalRecord.audioPath ? (
               <div className="modal-audio">
                 <audio controls src={getAudioUrl(familySlug, modalRecord.id)} />
-                <p className="modal-detail-recorded">Recorded {formatCardTimestamp(modalRecord.createdAt)}</p>
+                <p className="modal-detail-recorded">
+                  {isKo ? '녹음 시간 ' : 'Recorded '}
+                  {formatCardTimestamp(modalRecord.createdAt)}
+                </p>
               </div>
             ) : (
-              <p className="modal-detail-recorded modal-detail-recorded-standalone">Recorded {formatCardTimestamp(modalRecord.createdAt)}</p>
+              <p className="modal-detail-recorded modal-detail-recorded-standalone">
+                {isKo ? '녹음 시간 ' : 'Recorded '}
+                {formatCardTimestamp(modalRecord.createdAt)}
+              </p>
             )}
             <div className="result-block">
-              <label>Transcription (Mandarin)</label>
+              <label>{isKo ? '원문 (중국어)' : 'Transcription (Mandarin)'}</label>
               <p className="text-block">{modalRecord.transcript || '—'}</p>
             </div>
             <div className="result-block">
-              <label>Translation (English)</label>
+              <label>{isKo ? '번역 (영어)' : 'Translation (English)'}</label>
               <p className="text-block">{modalRecord.translation || '—'}</p>
             </div>
             {detailEditMode && (
               <div className="modal-detail-actions">
                 <button type="button" className="btn btn-save" onClick={handleSaveDetailChanges}>
-                  Save changes
+                  {isKo ? '변경 사항 저장' : 'Save changes'}
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={handleCancelDetailEdit}>
-                  Cancel
+                  {isKo ? '취소' : 'Cancel'}
                 </button>
               </div>
             )}
             {confirmDeleteId === modalRecord.id && (
               <div className="confirm-popup-overlay" onClick={(e) => e.stopPropagation()}>
                 <div className="confirm-popup">
-                  <p className="confirm-popup-text">Are you sure you want to delete this recording?</p>
+                  <p className="confirm-popup-text">
+                    {isKo ? '이 녹음을 정말 삭제할까요?' : 'Are you sure you want to delete this recording?'}
+                  </p>
                   <div className="confirm-popup-actions">
                     <button type="button" className="btn btn-discard-confirm" onClick={handleDeleteRecording}>
-                      Yes, delete
+                      {isKo ? '네, 삭제할게요' : 'Yes, delete'}
                     </button>
                     <button type="button" className="btn btn-secondary" onClick={() => setConfirmDeleteId(null)}>
-                      No
+                      {isKo ? '아니요' : 'No'}
                     </button>
                   </div>
                 </div>
@@ -1646,14 +1756,14 @@ export default function App() {
         >
           <div className="modal-content" style={{ maxWidth: '320px' }} onClick={(e) => e.stopPropagation()}>
             <p id="confirmDiscardChangesTitle" className="confirm-popup-text">
-              Are you sure you want to discard your changes?
+              {isKo ? '지금까지 수정한 내용을 버릴까요?' : 'Are you sure you want to discard your changes?'}
             </p>
             <div className="confirm-popup-actions">
               <button type="button" className="btn btn-discard-confirm" onClick={handleConfirmDiscardChanges}>
-                Yes, discard
+                {isKo ? '네, 버릴게요' : 'Yes, discard'}
               </button>
               <button type="button" className="btn btn-secondary" onClick={() => setConfirmDiscardChangesOpen(false)}>
-                No
+                {isKo ? '아니요' : 'No'}
               </button>
             </div>
           </div>
