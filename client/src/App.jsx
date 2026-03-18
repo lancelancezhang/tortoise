@@ -2,6 +2,95 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { listRecordings, saveRecording, getAudioUrl, getPhotoUrl, deleteRecording, updateRecording, listFamilyMembers, addFamilyMember, updateFamilyMember, deleteFamilyMember } from './api';
 
+// --- Recording draft recovery (IndexedDB) ---
+// Fix: long recordings can lose audio if the browser/OS interrupts before stop().
+// We record in 1s chunks and checkpoint them to IndexedDB.
+const DRAFT_DB = 'stories2-recording-drafts';
+const DRAFT_STORE = 'chunks';
+const META_STORE = 'meta';
+
+function openDraftDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DRAFT_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(DRAFT_STORE)) db.createObjectStore(DRAFT_STORE, { keyPath: 'key' });
+      if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: 'draftId' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function draftPutMeta(meta) {
+  const db = await openDraftDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(META_STORE, 'readwrite');
+    tx.objectStore(META_STORE).put(meta);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function draftPutChunk(draftId, seq, blob) {
+  const db = await openDraftDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_STORE, 'readwrite');
+    tx.objectStore(DRAFT_STORE).put({ key: `${draftId}:${seq}`, draftId, seq, blob });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function draftListChunks(draftId) {
+  const db = await openDraftDb();
+  const all = await new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_STORE, 'readonly');
+    const req = tx.objectStore(DRAFT_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+  db.close();
+  return (all || [])
+    .filter((c) => c.draftId === draftId)
+    .sort((a, b) => a.seq - b.seq)
+    .map((c) => c.blob)
+    .filter(Boolean);
+}
+
+async function draftGetLatestMeta() {
+  const db = await openDraftDb();
+  const all = await new Promise((resolve, reject) => {
+    const tx = db.transaction(META_STORE, 'readonly');
+    const req = tx.objectStore(META_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+  db.close();
+  return (all || []).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
+}
+
+async function draftClear(draftId) {
+  const db = await openDraftDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([DRAFT_STORE, META_STORE], 'readwrite');
+    const chunkStore = tx.objectStore(DRAFT_STORE);
+    const metaStore = tx.objectStore(META_STORE);
+    const keysReq = chunkStore.getAllKeys();
+    keysReq.onsuccess = () => {
+      (keysReq.result || []).forEach((key) => {
+        if (typeof key === 'string' && key.startsWith(`${draftId}:`)) chunkStore.delete(key);
+      });
+      metaStore.delete(draftId);
+    };
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
 function getTimestampName() {
   const now = new Date();
   const y = now.getFullYear();
@@ -61,6 +150,7 @@ export default function App() {
   const [translation, setTranslation] = useState('');
   const [showResults, setShowResults] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
+  const [recoverableDraft, setRecoverableDraft] = useState(null);
   const [savedList, setSavedList] = useState([]);
   const [modalRecord, setModalRecord] = useState(null);
   const [modalRecordingOpen, setModalRecordingOpen] = useState(false);
@@ -128,6 +218,8 @@ export default function App() {
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const draftIdRef = useRef(null);
+  const chunkSeqRef = useRef(0);
   const recognitionRef = useRef(null);
   const currentTranscriptRef = useRef('');
   const recordStartTimeRef = useRef(null);
@@ -191,6 +283,22 @@ export default function App() {
     } catch {}
   }, [uiLanguage]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const meta = await draftGetLatestMeta();
+        if (cancelled) return;
+        setRecoverableDraft(meta && meta.hasAudio ? meta : null);
+      } catch {
+        if (!cancelled) setRecoverableDraft(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const startRecording = async () => {
     currentTranscriptRef.current = '';
     setTranscript('');
@@ -198,6 +306,16 @@ export default function App() {
     setShowResults(false);
     setAudioBlob(null);
     audioChunksRef.current = [];
+    chunkSeqRef.current = 0;
+    draftIdRef.current = `draft-${Date.now()}`;
+    try {
+      await draftPutMeta({
+        draftId: draftIdRef.current,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        hasAudio: false,
+      });
+    } catch {}
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -214,7 +332,15 @@ export default function App() {
       analyserRef.current = analyser;
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (!e.data || e.data.size <= 0) return;
+        audioChunksRef.current.push(e.data);
+        const draftId = draftIdRef.current;
+        if (draftId) {
+          const seq = chunkSeqRef.current++;
+          draftPutChunk(draftId, seq, e.data).catch(() => {});
+          draftPutMeta({ draftId, createdAt: Date.now(), updatedAt: Date.now(), hasAudio: true }).catch(() => {});
+          setRecoverableDraft({ draftId, updatedAt: Date.now(), hasAudio: true });
+        }
       };
       mediaRecorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
@@ -224,7 +350,9 @@ export default function App() {
         }
         audioContextRef.current = null;
       };
-      mediaRecorder.start();
+      // Critical for long recordings: emit chunks during recording so audio isn't lost
+      // if the browser/OS interrupts before stop().
+      mediaRecorder.start(1000);
 
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognition) {
@@ -245,7 +373,14 @@ export default function App() {
           setTranscript(currentTranscriptRef.current + (interim ? ' ' + interim : ''));
         };
         rec.onerror = (e) => {
-          if (e.error !== 'aborted') setStatus('Speech recognition error: ' + e.error);
+          if (e.error === 'aborted') return;
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+          const overlayHint = isMobile && (e.error === 'not-allowed' || e.error === 'audio-capture');
+          if (isKo) {
+            setStatus(overlayHint ? '마이크를 사용할 수 없어요. 채팅 말풍선·띄워 둔 앱을 닫은 뒤 다시 시도해 주세요.' : '음성 인식 오류: ' + e.error);
+          } else {
+            setStatus(overlayHint ? 'Microphone blocked. Close chat bubbles or floating apps, then try again.' : 'Speech recognition error: ' + e.error);
+          }
         };
         rec.start();
         recognitionRef.current = rec;
@@ -258,8 +393,15 @@ export default function App() {
       setRecordingDuration(0);
       recordStartTimeRef.current = Date.now();
       setStatus('');
-    } catch {
-      setStatus('Microphone access denied or not available.');
+    } catch (err) {
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (typeof window !== 'undefined' && window.innerWidth < 600);
+      if (isKo) {
+        setStatus('마이크를 사용할 수 없어요. 휴대폰이면 채팅 말풍선·띄워 둔 앱을 모두 닫은 뒤 다시 시도해 주세요.');
+      } else {
+        setStatus(isMobile
+          ? 'Microphone blocked. On phones: close any chat bubbles or floating apps (e.g. Messenger), then try again.'
+          : 'Microphone access denied or not available.');
+      }
     }
   };
 
@@ -376,7 +518,8 @@ export default function App() {
         }
 
         const chunks = audioChunksRef.current;
-        setAudioBlob(chunks.length ? new Blob(chunks, { type: 'audio/webm' }) : null);
+        const blob = chunks.length ? new Blob(chunks, { type: 'audio/webm' }) : null;
+        setAudioBlob(blob);
         setShowResults(true);
         setStatus('Done. Save or discard.');
         if (recordingSuggestedTitleRef.current) {
@@ -386,11 +529,38 @@ export default function App() {
           setRecordingDuration(Math.floor((Date.now() - recordStartTimeRef.current) / 1000));
         }
         recordStartTimeRef.current = null;
+        if (draftIdRef.current) {
+          draftPutMeta({
+            draftId: draftIdRef.current,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            hasAudio: !!blob,
+            transcript: finalTranscript,
+          }).catch(() => {});
+        }
         resolve();
       };
       mediaRecorder.stop();
     });
   };
+
+  const recoverLastRecording = useCallback(async () => {
+    if (!recoverableDraft?.draftId) return;
+    try {
+      const blobs = await draftListChunks(recoverableDraft.draftId);
+      const blob = blobs.length ? new Blob(blobs, { type: 'audio/webm' }) : null;
+      if (!blob) {
+        setStatus(isKo ? '복구할 녹음 파일이 없어요.' : 'No audio found to recover.');
+        return;
+      }
+      setAudioBlob(blob);
+      setShowResults(true);
+      setModalRecordingOpen(true);
+      setStatus(isKo ? '이전 녹음을 복구했어요. 저장하거나 버릴 수 있어요.' : 'Recovered the last recording. You can save or discard.');
+    } catch {
+      setStatus(isKo ? '복구에 실패했어요.' : 'Recovery failed.');
+    }
+  }, [recoverableDraft, isKo]);
 
   const handleSave = async () => {
     const titleTrimmed = recordTitle.trim();
@@ -419,6 +589,14 @@ export default function App() {
       });
       setStatus(`Saved as "${titleTrimmed}".`);
       loadList();
+      try {
+        if (draftIdRef.current) await draftClear(draftIdRef.current);
+        if (recoverableDraft?.draftId && recoverableDraft.draftId !== draftIdRef.current) {
+          await draftClear(recoverableDraft.draftId);
+        }
+      } catch {}
+      draftIdRef.current = null;
+      setRecoverableDraft(null);
       setShowResults(false);
       setTranscript('');
       setTranslation('');
@@ -535,6 +713,16 @@ export default function App() {
         mr.stop();
       }
     }
+    (async () => {
+      try {
+        if (draftIdRef.current) await draftClear(draftIdRef.current);
+        if (recoverableDraft?.draftId && recoverableDraft.draftId !== draftIdRef.current) {
+          await draftClear(recoverableDraft.draftId);
+        }
+      } catch {}
+      draftIdRef.current = null;
+      setRecoverableDraft(null);
+    })();
     setConfirmDiscardOpen(false);
     closeRecordingModal();
   };
@@ -1295,6 +1483,13 @@ export default function App() {
                           {recordingPrompt}
                         </div>
                       )}
+                      {typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) && (
+                        <p className="recording-mobile-tip" role="status">
+                          {isKo
+                            ? '휴대폰: 녹음 전에 채팅 말풍선·띄워 둔 앱을 닫으면 더 잘 돼요.'
+                            : 'On phones: close chat bubbles or floating apps before recording for best results.'}
+                        </p>
+                      )}
                       <div className="recording-voice-block">
                         <div className="recording-waveform" aria-hidden>
                           <canvas
@@ -1324,6 +1519,15 @@ export default function App() {
                       </div>
 
                       <div className="recording-actions">
+                        {!isRecording && recoverableDraft?.draftId && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary recording-recover"
+                            onClick={recoverLastRecording}
+                          >
+                            {isKo ? '이전 녹음 복구' : 'Recover last recording'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn-mic-circle"
@@ -1695,6 +1899,13 @@ export default function App() {
             {modalRecord.audioPath ? (
               <div className="modal-audio">
                 <audio controls src={getAudioUrl(familySlug, modalRecord.id)} />
+                <a
+                  className="modal-audio-download"
+                  href={getAudioUrl(familySlug, modalRecord.id)}
+                  download={`${(modalRecord.title || 'recording').replace(/[\\/:*?"<>|]+/g, '').trim() || 'recording'}.webm`}
+                >
+                  {isKo ? '녹음 파일 다운로드' : 'Download recording'}
+                </a>
                 <p className="modal-detail-recorded">
                   {isKo ? '녹음 시간 ' : 'Recorded '}
                   {formatCardTimestamp(modalRecord.createdAt)}

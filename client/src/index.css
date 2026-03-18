@@ -541,6 +541,14 @@ body {
   border: 1px solid rgba(251, 191, 36, 0.5);
 }
 
+.recording-mobile-tip {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin: 0 0 1rem;
+  padding: 0;
+  line-height: 1.4;
+}
+
 @media (min-width: 480px) {
   .modal-prompt-title {
     font-size: 1.5rem;
@@ -785,6 +793,11 @@ body {
   justify-content: center;
   gap: 1rem;
   margin-bottom: 1rem;
+}
+
+.recording-recover {
+  font-weight: 800;
+  padding: 0.6rem 0.85rem;
 }
 
 .btn-mic-circle {
@@ -1697,6 +1710,34 @@ body {
 .modal-audio audio {
   width: 100%;
   height: 40px;
+}
+
+.modal-audio-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.modal-audio-download:hover {
+  background: #f8fafc;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.modal-audio-download:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .modal-content .result-block {
