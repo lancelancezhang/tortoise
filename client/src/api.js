@@ -32,6 +32,35 @@ export function getAudioUrl(familySlug, id) {
   return `${familyApi(familySlug)}/recordings/${id}/audio`;
 }
 
+/** Extension for uploaded blob so the server stores .m4a on Safari and .webm on Chrome. */
+export function filenameForAudioUpload(id, audioBlob) {
+  if (!audioBlob) return `${id}.webm`;
+  const t = audioBlob.type || '';
+  if (t.includes('mp4') || t.includes('m4a') || t.includes('aac')) return `${id}.m4a`;
+  return `${id}.webm`;
+}
+
+/**
+ * iOS Safari often ignores <a download> for cross-origin URLs. Fetch+blob works reliably.
+ */
+export async function downloadRecordingAsFile(url, baseName) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Download failed');
+  const blob = await res.blob();
+  const ct = res.headers.get('Content-Type') || blob.type || '';
+  let ext = '.webm';
+  if (ct.includes('mp4') || ct.includes('m4a') || ct.includes('aac')) ext = '.m4a';
+  const safe = (baseName || 'recording').replace(/[\\/:*?"<>|]+/g, '').trim() || 'recording';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${safe}${ext}`;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 export function getPhotoUrl(familySlug, id) {
   return `${familyApi(familySlug)}/recordings/${id}/photo`;
 }
@@ -47,7 +76,7 @@ export async function saveRecording(familySlug, { id, name, createdAt, transcrip
   if (description != null) form.append('description', description);
   if (storyDate != null) form.append('storyDate', storyDate);
   if (familyMemberId != null && familyMemberId !== '') form.append('familyMemberId', familyMemberId);
-  if (audioBlob) form.append('audio', audioBlob, audioBlob.name || `${id}.webm`);
+  if (audioBlob) form.append('audio', audioBlob, audioBlob.name || filenameForAudioUpload(id, audioBlob));
   if (photoFile) form.append('photo', photoFile, photoFile.name || `${id}-photo${photoFile.name ? '' : '.jpg'}`);
 
   const res = await fetch(`${familyApi(familySlug)}/recordings`, {

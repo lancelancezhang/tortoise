@@ -24,6 +24,33 @@ function ensureFamilyUploadDir(familyId) {
   return dir;
 }
 
+/** Explicit types so Safari/iOS can play media from <audio>/<img> (Range + correct MIME). */
+function contentTypeForFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const map = {
+    '.webm': 'audio/webm',
+    '.mp4': 'audio/mp4',
+    '.m4a': 'audio/mp4',
+    '.aac': 'audio/aac',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function sendFileWithMediaHeaders(res, filePath) {
+  const resolved = path.resolve(filePath);
+  res.sendFile(resolved, {
+    headers: {
+      'Content-Type': contentTypeForFile(resolved),
+      'Accept-Ranges': 'bytes',
+    },
+  });
+}
+
 /** Generate a URL-safe short slug for a new family */
 function generateFamilySlug() {
   return crypto.randomBytes(6).toString('base64url').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -164,7 +191,7 @@ app.get('/api/f/:familySlug/recordings/:id/audio', resolveFamily, async (req, re
     if (error || !data || !data.audio_path) return res.status(404).send('No audio');
     const filePath = path.join(UPLOAD_DIR, req.familyId, path.basename(data.audio_path));
     if (!fs.existsSync(filePath)) return res.status(404).send('File missing');
-    res.sendFile(path.resolve(filePath));
+    sendFileWithMediaHeaders(res, filePath);
   } catch (e) {
     res.status(500).send('Error');
   }
@@ -181,7 +208,7 @@ app.get('/api/f/:familySlug/recordings/:id/photo', resolveFamily, async (req, re
     if (error || !data || !data.photo_path) return res.status(404).send('No photo');
     const filePath = path.join(UPLOAD_DIR, req.familyId, path.basename(data.photo_path));
     if (!fs.existsSync(filePath)) return res.status(404).send('File missing');
-    res.sendFile(path.resolve(filePath));
+    sendFileWithMediaHeaders(res, filePath);
   } catch (e) {
     res.status(500).send('Error');
   }

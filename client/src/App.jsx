@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { listRecordings, saveRecording, getAudioUrl, getPhotoUrl, deleteRecording, updateRecording, listFamilyMembers, addFamilyMember, updateFamilyMember, deleteFamilyMember } from './api';
+import { listRecordings, saveRecording, getAudioUrl, getPhotoUrl, deleteRecording, updateRecording, listFamilyMembers, addFamilyMember, updateFamilyMember, deleteFamilyMember, downloadRecordingAsFile } from './api';
 
 // --- Recording draft recovery (IndexedDB) ---
 // Fix: long recordings can lose audio if the browser/OS interrupts before stop().
@@ -72,6 +72,18 @@ async function draftGetLatestMeta() {
   return (all || []).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
 }
 
+async function draftGetMeta(draftId) {
+  const db = await openDraftDb();
+  const meta = await new Promise((resolve, reject) => {
+    const tx = db.transaction(META_STORE, 'readonly');
+    const req = tx.objectStore(META_STORE).get(draftId);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  db.close();
+  return meta || null;
+}
+
 async function draftClear(draftId) {
   const db = await openDraftDb();
   await new Promise((resolve, reject) => {
@@ -117,6 +129,21 @@ async function translateToEnglish(text, spokenLanguage = 'mandarin') {
     return data.responseData.translatedText;
   }
   return '[Translation failed]';
+}
+
+/** Safari / iOS only supports recording MP4 (AAC); Chrome uses WebM/Opus. */
+function pickPreferredRecordingMimeType() {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+  ];
+  for (const t of candidates) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
 }
 
 const STORY_PROMPTS = [
@@ -221,6 +248,19 @@ export default function App() {
   const waveformCanvasRef = useRef(null);
   const audioContextRef = useRef(null);
   const recordingSuggestedTitleRef = useRef(null);
+  const recordingMimeTypeRef = useRef('audio/webm');
+  const recordingStreamRef = useRef(null);
+
+  const audioCrossOrigin = useMemo(() => {
+    if (typeof window === 'undefined') return undefined;
+    const base = import.meta.env?.VITE_API_URL;
+    if (!base) return undefined;
+    try {
+      return new URL(base).origin !== window.location.origin ? 'anonymous' : undefined;
+    } catch {
+      return undefined;
+    }
+  }, []);
 
   const loadList = useCallback(async () => {
     if (!familySlug) return;
@@ -301,19 +341,40 @@ export default function App() {
     audioChunksRef.current = [];
     chunkSeqRef.current = 0;
     draftIdRef.current = `draft-${Date.now()}`;
+    recordingMimeTypeRef.current = 'audio/webm';
     try {
       await draftPutMeta({
         draftId: draftIdRef.current,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         hasAudio: false,
+        recordingMime: recordingMimeTypeRef.current,
       });
     } catch {}
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      recordingStreamRef.current = stream;
+      const preferred = pickPreferredRecordingMimeType();
+      let mediaRecorder;
+      try {
+        mediaRecorder = preferred
+          ? new MediaRecorder(stream, { mimeType: preferred })
+          : new MediaRecorder(stream);
+      } catch {
+        mediaRecorder = new MediaRecorder(stream);
+      }
+      recordingMimeTypeRef.current = mediaRecorder.mimeType || preferred || 'audio/webm';
       mediaRecorderRef.current = mediaRecorder;
+      try {
+        await draftPutMeta({
+          draftId: draftIdRef.current,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          hasAudio: false,
+          recordingMime: recordingMimeTypeRef.current,
+        });
+      } catch {}
 
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       audioContextRef.current = audioContext;
@@ -331,12 +392,24 @@ export default function App() {
         if (draftId) {
           const seq = chunkSeqRef.current++;
           draftPutChunk(draftId, seq, e.data).catch(() => {});
-          draftPutMeta({ draftId, createdAt: Date.now(), updatedAt: Date.now(), hasAudio: true }).catch(() => {});
-          setRecoverableDraft({ draftId, updatedAt: Date.now(), hasAudio: true });
+          draftPutMeta({
+            draftId,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            hasAudio: true,
+            recordingMime: recordingMimeTypeRef.current,
+          }).catch(() => {});
+          setRecoverableDraft({
+            draftId,
+            updatedAt: Date.now(),
+            hasAudio: true,
+            recordingMime: recordingMimeTypeRef.current,
+          });
         }
       };
       mediaRecorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
         analyserRef.current = null;
         if (audioContextRef.current?.state !== 'closed') {
           audioContextRef.current?.close();
@@ -495,6 +568,14 @@ export default function App() {
 
     await new Promise((resolve) => {
       mediaRecorder.onstop = async () => {
+        recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
+        analyserRef.current = null;
+        if (audioContextRef.current?.state !== 'closed') {
+          audioContextRef.current?.close();
+        }
+        audioContextRef.current = null;
+
         const raw = (currentTranscriptRef.current || transcript).replace(/^…\s*/, '').trim();
         const finalTranscript = raw || '(No speech detected)';
         setTranscript(finalTranscript);
@@ -511,7 +592,8 @@ export default function App() {
         }
 
         const chunks = audioChunksRef.current;
-        const blob = chunks.length ? new Blob(chunks, { type: 'audio/webm' }) : null;
+        const mime = mediaRecorder.mimeType || recordingMimeTypeRef.current || 'audio/webm';
+        const blob = chunks.length ? new Blob(chunks, { type: mime }) : null;
         setAudioBlob(blob);
         setShowResults(true);
         setStatus('Done. Save or discard.');
@@ -541,7 +623,9 @@ export default function App() {
     if (!recoverableDraft?.draftId) return;
     try {
       const blobs = await draftListChunks(recoverableDraft.draftId);
-      const blob = blobs.length ? new Blob(blobs, { type: 'audio/webm' }) : null;
+      const meta = await draftGetMeta(recoverableDraft.draftId);
+      const mime = meta?.recordingMime || recoverableDraft.recordingMime || 'audio/webm';
+      const blob = blobs.length ? new Blob(blobs, { type: mime }) : null;
       if (!blob) {
         setStatus(isKo ? '복구할 녹음 파일이 없어요.' : 'No audio found to recover.');
         return;
@@ -1697,14 +1781,27 @@ export default function App() {
             </div>
             {modalRecord.audioPath ? (
               <div className="modal-audio">
-                <audio controls src={getAudioUrl(familySlug, modalRecord.id)} />
-                <a
+                <audio
+                  controls
+                  crossOrigin={audioCrossOrigin}
+                  preload="metadata"
+                  src={getAudioUrl(familySlug, modalRecord.id)}
+                />
+                <button
+                  type="button"
                   className="modal-audio-download"
-                  href={getAudioUrl(familySlug, modalRecord.id)}
-                  download={`${(modalRecord.title || 'recording').replace(/[\\/:*?"<>|]+/g, '').trim() || 'recording'}.webm`}
+                  onClick={async () => {
+                    const base = (modalRecord.title || 'recording').replace(/[\\/:*?"<>|]+/g, '').trim() || 'recording';
+                    try {
+                      await downloadRecordingAsFile(getAudioUrl(familySlug, modalRecord.id), base);
+                    } catch {
+                      setToastMessage(isKo ? '다운로드에 실패했어요.' : 'Download failed.');
+                      setTimeout(() => setToastMessage(''), 2500);
+                    }
+                  }}
                 >
                   {isKo ? '녹음 파일 다운로드' : 'Download recording'}
-                </a>
+                </button>
                 <p className="modal-detail-recorded">
                   {isKo ? '녹음 시간 ' : 'Recorded '}
                   {formatCardTimestamp(modalRecord.createdAt)}
