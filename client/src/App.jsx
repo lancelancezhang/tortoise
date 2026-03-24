@@ -131,6 +131,32 @@ async function translateToEnglish(text, spokenLanguage = 'mandarin') {
   return '[Translation failed]';
 }
 
+function formatMicAccessError(err, isKo) {
+  const name = err?.name || '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return isKo
+      ? '마이크가 꺼져 있어요. 주소창의 자물쇠(ⓘ)를 눌러 마이크를 허용해 주세요.'
+      : 'Microphone access was denied. Use the lock or (i) icon in the address bar and allow the microphone for this site.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return isKo ? '마이크를 찾을 수 없어요.' : 'No microphone was found.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return isKo
+      ? '마이크를 쓸 수 없어요. 다른 앱이 마이크를 쓰는지 확인해 주세요.'
+      : 'Microphone is busy or unavailable. Close other apps using the mic and try again.';
+  }
+  if (!window.isSecureContext) {
+    return isKo ? '마이크를 쓰려면 HTTPS로 접속해야 해요.' : 'Open this page over HTTPS (not http://) to use the microphone.';
+  }
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+    return isKo ? '이 기기에서 마이크 설정을 맞출 수 없어요.' : 'Your microphone does not support the required settings.';
+  }
+  return isKo
+    ? `녹음을 시작할 수 없어요 (${name || '오류'}).`
+    : `Could not start recording (${name || err?.message || 'unknown error'}).`;
+}
+
 /** Safari / iOS only supports recording MP4 (AAC); Chrome uses WebM/Opus. */
 function pickPreferredRecordingMimeType() {
   if (typeof MediaRecorder === 'undefined') return '';
@@ -342,17 +368,25 @@ export default function App() {
     chunkSeqRef.current = 0;
     draftIdRef.current = `draft-${Date.now()}`;
     recordingMimeTypeRef.current = 'audio/webm';
-    try {
-      await draftPutMeta({
-        draftId: draftIdRef.current,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        hasAudio: false,
-        recordingMime: recordingMimeTypeRef.current,
-      });
-    } catch {}
+    void draftPutMeta({
+      draftId: draftIdRef.current,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      hasAudio: false,
+      recordingMime: recordingMimeTypeRef.current,
+    }).catch(() => {});
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus(
+        isKo
+          ? '이 브라우저에서는 마이크를 사용할 수 없어요.'
+          : 'Microphone is not available in this browser or context.',
+      );
+      return;
+    }
 
     try {
+      // iOS Safari: any await before getUserMedia can drop the user-gesture chain and make mic access fail.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
       const preferred = pickPreferredRecordingMimeType();
@@ -378,6 +412,9 @@ export default function App() {
 
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       audioContextRef.current = audioContext;
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
@@ -440,34 +477,32 @@ export default function App() {
         };
         rec.onerror = (e) => {
           if (e.error === 'aborted') return;
-          const isMobile = /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-          const overlayHint = isMobile && (e.error === 'not-allowed' || e.error === 'audio-capture');
+          // Mic already works here; Web Speech often reports not-allowed on iOS/Safari — do not blame the microphone.
+          if (e.error === 'no-speech') return;
           if (isKo) {
-            setStatus(overlayHint ? '마이크를 사용할 수 없어요. 채팅 말풍선·띄워 둔 앱을 닫은 뒤 다시 시도해 주세요.' : '음성 인식 오류: ' + e.error);
+            setStatus('실시간 받아쓰기에 문제가 있을 수 있어요. 녹음은 계속됩니다.');
           } else {
-            setStatus(overlayHint ? 'Microphone blocked. Close chat bubbles or floating apps, then try again.' : 'Speech recognition error: ' + e.error);
+            setStatus('Live captions may not work in this browser; recording still works.');
           }
         };
         rec.start();
         recognitionRef.current = rec;
       } else {
         setTranscript('…');
-        setStatus('Speech recognition not supported. Use Chrome or Edge.');
+        setStatus(
+          isKo
+            ? '이 브라우저는 실시간 받아쓰기를 지원하지 않아요. 녹음 후 텍스트를 직접 적을 수 있어요.'
+            : 'Live transcription is not available in this browser. You can still record and type notes after.',
+        );
       }
 
       setIsRecording(true);
       setRecordingDuration(0);
       recordStartTimeRef.current = Date.now();
-      setStatus('');
+      if (SpeechRecognition) setStatus('');
     } catch (err) {
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (typeof window !== 'undefined' && window.innerWidth < 600);
-      if (isKo) {
-        setStatus('마이크를 사용할 수 없어요. 휴대폰이면 채팅 말풍선·띄워 둔 앱을 모두 닫은 뒤 다시 시도해 주세요.');
-      } else {
-        setStatus(isMobile
-          ? 'Microphone blocked. On phones: close any chat bubbles or floating apps (e.g. Messenger), then try again.'
-          : 'Microphone access denied or not available.');
-      }
+      recordingStreamRef.current = null;
+      setStatus(formatMicAccessError(err, isKo));
     }
   };
 
