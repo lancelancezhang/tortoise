@@ -169,12 +169,6 @@ export default function App() {
   const [detailEditMode, setDetailEditMode] = useState(false);
   const [detailMenuOpen, setDetailMenuOpen] = useState(false);
   const detailMenuRef = useRef(null);
-  const [modalImportOpen, setModalImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState(null);
-  const [importTitle, setImportTitle] = useState('');
-  const [importDescription, setImportDescription] = useState('');
-  const [importStoryDate, setImportStoryDate] = useState('');
-  const [importStatus, setImportStatus] = useState('');
   const [promptModalOpen, setPromptModalOpen] = useState(false);
   const [currentStoryPrompt, setCurrentStoryPrompt] = useState(null);
   const [recordingPrompt, setRecordingPrompt] = useState(null);
@@ -189,7 +183,6 @@ export default function App() {
   const [recordPhotoPreview, setRecordPhotoPreview] = useState(null);
   const [recordMode, setRecordMode] = useState('voice'); // 'voice' | 'photo'
   const [recordModeModalOpen, setRecordModeModalOpen] = useState(false);
-  const [importFamilyMemberId, setImportFamilyMemberId] = useState('');
   const [editFamilyMemberId, setEditFamilyMemberId] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
@@ -647,23 +640,6 @@ export default function App() {
     fn?.();
   };
 
-  const closeImportModal = () => {
-    setModalImportOpen(false);
-    setImportFile(null);
-    setImportTitle('');
-    setImportDescription('');
-    setImportStoryDate('');
-    setImportStatus('');
-    setImportFamilyMemberId('');
-  };
-
-  const hasImportFormDirty = () =>
-    importTitle.trim() !== '' ||
-    importDescription.trim() !== '' ||
-    importStoryDate.trim() !== '' ||
-    importFile != null ||
-    importFamilyMemberId !== '';
-
   const closeOnboardingModal = () => {
     setOnboardingOpen(false);
     setEditingFamilyId(null);
@@ -829,43 +805,6 @@ export default function App() {
     }
   };
 
-  const handleImportSave = async () => {
-    const titleTrimmed = importTitle.trim();
-    if (!titleTrimmed) {
-      setImportStatus('Please enter a title.');
-      return;
-    }
-    if (!importFile) {
-      setImportStatus('Please choose an audio file.');
-      return;
-    }
-    const id = 'rec-' + Date.now();
-    setImportStatus('Saving…');
-    try {
-      await saveRecording(familySlug, {
-        id,
-        name: titleTrimmed,
-        createdAt: new Date().toISOString(),
-        transcript: '',
-        translation: '',
-        title: titleTrimmed,
-        description: importDescription.trim() || undefined,
-        storyDate: importStoryDate.trim() || undefined,
-        familyMemberId: importFamilyMemberId || undefined,
-        audioBlob: importFile,
-      });
-      setModalImportOpen(false);
-      setImportFile(null);
-      setImportTitle('');
-      setImportDescription('');
-      setImportStoryDate('');
-      setImportStatus('');
-      loadList();
-    } catch {
-      setImportStatus('Import failed.');
-    }
-  };
-
   const handleCancelDetailEdit = () => {
     setEditTitle(modalRecord?.title?.trim() ?? '');
     setEditDescription(modalRecord?.description?.trim() ?? '');
@@ -905,9 +844,9 @@ export default function App() {
             onClick={() => {
               setRecordModeModalOpen(true);
             }}
-            aria-label="Record story"
+            aria-label="Record"
           >
-            {isKo ? '이야기 녹음하기' : 'Record story'}
+            {isKo ? '녹음하기' : 'Record'}
           </button>
           <div className="header-more-wrap" ref={moreMenuRef}>
             <button
@@ -922,23 +861,6 @@ export default function App() {
             </button>
             {moreMenuOpen && (
               <div className="header-more-dropdown" role="menu">
-                <button
-                  type="button"
-                  className="header-more-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setMoreMenuOpen(false);
-                    setModalImportOpen(true);
-                    setImportFile(null);
-                    setImportTitle('');
-                    setImportDescription('');
-                    setImportStoryDate('');
-                    setImportStatus('');
-                    setImportFamilyMemberId('');
-                  }}
-                >
-                  {isKo ? '이야기 가져오기' : 'Import story'}
-                </button>
                 <button
                   type="button"
                   className="header-more-item"
@@ -1010,7 +932,7 @@ export default function App() {
                   <option value="korean">{isKo ? '한국어' : 'Korean'}</option>
                 </select>
                 <p className="input-hint">
-                  {isKo ? '이야기는 받아 적은 후 영어로 번역돼요.' : 'Stories will be transcribed and translated to English.'}
+                  {isKo ? '녹음은 받아 적은 후 영어로 번역돼요.' : 'Recordings will be transcribed and translated to English.'}
                 </p>
               </div>
               <div className="result-section">
@@ -1059,7 +981,7 @@ export default function App() {
                   {isKo ? '아직 추가된 가족이 없어요' : 'No family members yet'}
                 </p>
               ) : (
-                <ul className="onboarding-family-list" aria-label="Family and story authors">
+                <ul className="onboarding-family-list" aria-label="Family members">
                   {familyMembers.map((fm) => (
                     <li key={fm.id} className="onboarding-family-item">
                       <span className="onboarding-family-name">{fm.name}</span>
@@ -1215,34 +1137,6 @@ export default function App() {
               >
                 {isKo ? '사진 + 음성' : 'Photo + voice'}
               </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setRecordMode('voice');
-                  setRecordingPrompt(null);
-                  setRecordingSuggestedTitle(null);
-                  recordingSuggestedTitleRef.current = null;
-                  setStatus('');
-                  setStatusClass('');
-                  setShowResults(false);
-                  setTranscript('');
-                  setTranslation('');
-                  setAudioBlob(null);
-                  setRecordingDuration(0);
-                  setRecordTitle('');
-                  setRecordDescription('');
-                  setRecordStoryDate('');
-                  setRecordFamilyMemberId('');
-                  setRecordPhotoFile(null);
-                  setRecordPhotoPreview(null);
-                  setRecordModeModalOpen(false);
-                  setCurrentStoryPrompt(pickRandomPrompt());
-                  setPromptModalOpen(true);
-                }}
-              >
-                {isKo ? '이야기 질문' : 'Story prompt'}
-              </button>
             </div>
           </div>
         </div>
@@ -1344,7 +1238,7 @@ export default function App() {
 
       <section className="saved-section">
         <ul className="saved-list" aria-label="Saved recordings">
-          {savedList.length === 0 && <li className="empty-list">No stories yet. Record or import a story to start.</li>}
+          {savedList.length === 0 && <li className="empty-list">Nothing saved yet. Tap Record to get started.</li>}
           {savedList.map((r) => {
             const rawTitle = r.title?.trim() || formatCardTimestamp(r.createdAt);
             const displayTitle = rawTitle.length > 25 ? rawTitle.slice(0, 25) + '...' : rawTitle;
@@ -1441,7 +1335,7 @@ export default function App() {
           <div className="modal-recording">
             <header className="modal-recording-header">
               <h2 id="recordModalTitle">
-                {recordMode === 'photo' ? 'Record the story behind this photo' : 'Record story'}
+                {recordMode === 'photo' ? 'Record about this photo' : 'Record'}
               </h2>
               <button
                 type="button"
@@ -1459,7 +1353,7 @@ export default function App() {
                   {recordMode === 'photo' && (
                     <div className="record-photo-preview">
                       {recordPhotoPreview ? (
-                        <img src={recordPhotoPreview} alt="Selected story photo" />
+                        <img src={recordPhotoPreview} alt="Selected photo" />
                       ) : (
                         <label className="record-photo-picker">
                           <input
@@ -1555,7 +1449,7 @@ export default function App() {
                 <div className="recording-results">
                   {recordMode === 'photo' && recordPhotoPreview && (
                     <div className="record-photo-preview record-photo-preview-results">
-                      <img src={recordPhotoPreview} alt="Selected story photo" />
+                      <img src={recordPhotoPreview} alt="Selected photo" />
                     </div>
                   )}
                   <div className="result-section">
@@ -1564,14 +1458,14 @@ export default function App() {
                       id="record-title"
                       type="text"
                       className="input-field"
-                      placeholder="title of your story"
+                      placeholder="Title"
                       value={recordTitle}
                       onChange={(e) => setRecordTitle(e.target.value)}
                       aria-required="true"
                     />
                   </div>
                   <div className="result-section">
-                    <label className="result-label" htmlFor="record-date">When did this story happen?</label>
+                    <label className="result-label" htmlFor="record-date">When did this happen?</label>
                     <input
                       id="record-date"
                       type="date"
@@ -1585,20 +1479,20 @@ export default function App() {
                     <textarea
                       id="record-desc"
                       className="input-field input-textarea"
-                      placeholder="briefly describe your story"
+                      placeholder="Brief description (optional)"
                       rows={2}
                       value={recordDescription}
                       onChange={(e) => setRecordDescription(e.target.value)}
                     />
                   </div>
                   <div className="result-section">
-                    <label className="result-label" htmlFor="record-family">Story author</label>
+                    <label className="result-label" htmlFor="record-family">Author</label>
                     <select
                       id="record-family"
                       className="input-field"
                       value={recordFamilyMemberId}
                       onChange={(e) => setRecordFamilyMemberId(e.target.value)}
-                      aria-label="Tag this story with an author"
+                      aria-label="Tag with a family member"
                     >
                       <option value="">None</option>
                       {familyMembers.map((fm) => (
@@ -1648,101 +1542,6 @@ export default function App() {
         </div>
       )}
 
-      {modalImportOpen && (
-        <div
-          className="modal modal-recording-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="importModalTitle"
-          onClick={(e) => e.target === e.currentTarget && requestCloseWithDiscardConfirm(hasImportFormDirty(), closeImportModal)}
-        >
-          <div className="modal-content modal-import">
-            <header className="modal-import-header">
-              <h2 id="importModalTitle">Import story</h2>
-              <button
-                type="button"
-                className="modal-close-x"
-                onClick={() => requestCloseWithDiscardConfirm(hasImportFormDirty(), closeImportModal)}
-                aria-label="Close"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-              </button>
-            </header>
-            <div className="import-form">
-              <div className="result-section">
-                <label className="result-label" htmlFor="import-audio">Audio file</label>
-                <input
-                  id="import-audio"
-                  type="file"
-                  accept="audio/*"
-                  className="input-file"
-                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-                />
-                {importFile && (
-                  <span className="import-file-name">{importFile.name}</span>
-                )}
-              </div>
-              <div className="result-section">
-                <label className="result-label" htmlFor="import-title">Title</label>
-                <input
-                  id="import-title"
-                  type="text"
-                  className="input-field"
-                  placeholder="title of your story"
-                  value={importTitle}
-                  onChange={(e) => setImportTitle(e.target.value)}
-                />
-              </div>
-              <div className="result-section">
-                <label className="result-label" htmlFor="import-date">When did this story happen?</label>
-                <input
-                  id="import-date"
-                  type="date"
-                  className="input-field"
-                  value={importStoryDate}
-                  onChange={(e) => setImportStoryDate(e.target.value)}
-                />
-              </div>
-              <div className="result-section">
-                <label className="result-label" htmlFor="import-desc">Description</label>
-                <textarea
-                  id="import-desc"
-                  className="input-field input-textarea"
-                  placeholder="briefly describe your story"
-                  rows={2}
-                  value={importDescription}
-                  onChange={(e) => setImportDescription(e.target.value)}
-                />
-              </div>
-              <div className="result-section">
-                <label className="result-label" htmlFor="import-family">Story author</label>
-                <select
-                  id="import-family"
-                  className="input-field"
-                  value={importFamilyMemberId}
-                  onChange={(e) => setImportFamilyMemberId(e.target.value)}
-                  aria-label="Tag this story with an author"
-                >
-                  <option value="">None</option>
-                  {familyMembers.map((fm) => (
-                    <option key={fm.id} value={fm.id}>{fm.name} ({fm.relationship})</option>
-                  ))}
-                </select>
-              </div>
-              {importStatus && <p className="import-status">{importStatus}</p>}
-              <div className="modal-detail-actions">
-                <button type="button" className="btn btn-save" onClick={handleImportSave}>
-                  Save
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={() => requestCloseWithDiscardConfirm(hasImportFormDirty(), closeImportModal)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {modalRecord && (
         <div
           className="modal modal-recording-backdrop"
@@ -1761,7 +1560,7 @@ export default function App() {
                     className="modal-detail-title-input"
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="title of your story"
+                    placeholder="Title"
                   />
                 ) : (
                   <h2 id="modalTitle" className="modal-detail-title-view">
@@ -1823,7 +1622,7 @@ export default function App() {
             <div className="modal-detail-body">
               {modalRecord.photoPath && (
                 <div className="modal-detail-photo">
-                  <img src={getPhotoUrl(familySlug, modalRecord.id)} alt={modalRecord.title?.trim() || 'Story photo'} />
+                  <img src={getPhotoUrl(familySlug, modalRecord.id)} alt={modalRecord.title?.trim() || 'Photo'} />
                 </div>
               )}
               <section className="modal-detail-story" aria-labelledby="modalTitle">
@@ -1839,19 +1638,19 @@ export default function App() {
                         className="input-field input-field-date"
                         value={editStoryDate}
                         onChange={(e) => setEditStoryDate(e.target.value)}
-                        aria-label={isKo ? '언제 있었던 일인지' : 'When did this story happen'}
+                        aria-label={isKo ? '언제 있었던 일인지' : 'When it happened'}
                       />
                     </div>
                     <div className="modal-detail-when-row">
                       <label className="modal-detail-when-label" htmlFor="modal-detail-family">
-                        {isKo ? '이야기 주인공' : 'Story author'}
+                        {isKo ? '기록한 사람' : 'Author'}
                       </label>
                       <select
                         id="modal-detail-family"
                         className="input-field input-field-date"
                         value={editFamilyMemberId}
                         onChange={(e) => setEditFamilyMemberId(e.target.value)}
-                        aria-label={isKo ? '이야기 주인공' : 'Story author'}
+                        aria-label={isKo ? '기록한 사람' : 'Author'}
                       >
                         <option value="">None</option>
                         {familyMembers.map((fm) => (
@@ -1861,7 +1660,7 @@ export default function App() {
                     </div>
                     <textarea
                       className="modal-detail-description-input"
-                      placeholder={isKo ? '이야기에 대해 간단히 적어주세요' : 'briefly describe your story'}
+                      placeholder={isKo ? '간단한 설명 (선택)' : 'Brief description (optional)'}
                       rows={3}
                       value={editDescription}
                       onChange={(e) => setEditDescription(e.target.value)}
