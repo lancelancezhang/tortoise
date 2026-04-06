@@ -124,13 +124,38 @@
     setStatus('Processing…', 'processing');
 
     if (recognition) {
-      recognition.stop();
+      const rec = recognition;
       recognition = null;
+      await new Promise(function (resolve) {
+        var settled = false;
+        function finish() {
+          if (settled) return;
+          settled = true;
+          resolve();
+        }
+        var timer = setTimeout(finish, 600);
+        rec.addEventListener('end', function onEnd() {
+          clearTimeout(timer);
+          rec.removeEventListener('end', onEnd);
+          finish();
+        });
+        try {
+          rec.stop();
+        } catch (e) {
+          clearTimeout(timer);
+          finish();
+        }
+      });
     }
 
     return new Promise((resolve) => {
       mediaRecorder.onstop = async () => {
         mediaRecorder.stream.getTracks().forEach(t => t.stop());
+        await new Promise(function (r) {
+          requestAnimationFrame(function () {
+            requestAnimationFrame(r);
+          });
+        });
         const transcript = (currentTranscript || transcriptionEl.textContent || '').replace(/^…\s*/, '').trim();
         transcriptionEl.textContent = transcript || '(No speech detected)';
 

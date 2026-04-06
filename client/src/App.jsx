@@ -116,19 +116,69 @@ function getTimestampName() {
 
 const LANGPAIR = { mandarin: 'zh-CN|en', korean: 'ko|en' };
 
+/** MyMemory free tier works better under ~500 chars per request; split without breaking UTF-16. */
+function splitTextForTranslation(text, maxLen = 450) {
+  const t = text.trim();
+  if (t.length <= maxLen) return [t];
+  const parts = [];
+  let rest = t;
+  while (rest.length > maxLen) {
+    let cut = maxLen;
+    const slice = rest.slice(0, maxLen);
+    const space = slice.lastIndexOf(' ');
+    const nl = Math.max(slice.lastIndexOf('\n'), slice.lastIndexOf('\r'));
+    const prefer = Math.max(space, nl);
+    if (prefer > Math.floor(maxLen * 0.35)) cut = prefer + 1;
+    parts.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) parts.push(rest);
+  return parts.filter(Boolean);
+}
+
 async function translateToEnglish(text, spokenLanguage = 'mandarin') {
   if (!text?.trim()) return '';
   const langpair = LANGPAIR[spokenLanguage] || LANGPAIR.mandarin;
-  const url = 'https://api.mymemory.translated.net/get?' + new URLSearchParams({
-    q: text.trim(),
-    langpair,
-  });
-  const res = await fetch(url);
-  const data = await res.json();
-  if (data.responseStatus === 200 && data.responseData?.translatedText) {
-    return data.responseData.translatedText;
+  const chunks = splitTextForTranslation(text.trim(), 450);
+  const outs = [];
+  for (let i = 0; i < chunks.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 120));
+    const url = 'https://api.mymemory.translated.net/get?' + new URLSearchParams({
+      q: chunks[i],
+      langpair,
+    });
+    const res = await fetch(url);
+    const data = await res.json();
+    const translated = data.responseData?.translatedText;
+    if (typeof translated === 'string') {
+      if (translated.includes('MYMEMORY WARNING')) {
+        return outs.length
+          ? outs.join(' ').replace(/\s+/g, ' ').trim()
+          : '[Translation quota exceeded — try shorter text or try again later]';
+      }
+      if (data.responseStatus === 200 && translated) {
+        outs.push(translated);
+        continue;
+      }
+    }
+    outs.push('[Translation failed]');
   }
-  return '[Translation failed]';
+  return outs.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Prefer the speech alternative with highest confidence when the engine provides several (helps CJK). */
+function pickBestSpeechAlternative(result) {
+  if (!result?.length) return '';
+  let bestIdx = 0;
+  let bestConf = -1;
+  for (let j = 0; j < result.length; j++) {
+    const c = typeof result[j].confidence === 'number' ? result[j].confidence : -1;
+    if (c > bestConf) {
+      bestConf = c;
+      bestIdx = j;
+    }
+  }
+  return (result[bestIdx]?.transcript || '').trim();
 }
 
 function formatMicAccessError(err, isKo) {
@@ -173,11 +223,46 @@ function pickPreferredRecordingMimeType() {
 }
 
 const STORY_PROMPTS = [
-  { promptText: 'Tell me about the happiest moment of your life', suggestedTitle: 'The happiest moment of my life' },
-  { promptText: 'Tell me about a time you felt really proud', suggestedTitle: 'A time I felt really proud' },
-  { promptText: 'Tell me about someone who changed your life', suggestedTitle: 'Someone who changed my life' },
-  { promptText: 'Tell me about a place that feels like home', suggestedTitle: 'A place that feels like home' },
-  { promptText: 'Tell me about a lesson you\'ll never forget', suggestedTitle: 'A lesson I\'ll never forget' },
+  {
+    promptText: "What is something you've always nagged me about?",
+    suggestedTitle: "Something you've always nagged me about",
+  },
+  {
+    promptText: "What is a mistake that you made that you don't want me to repeat?",
+    suggestedTitle: "A mistake you don't want me to repeat",
+  },
+  {
+    promptText: 'How did having kids change you?',
+    suggestedTitle: 'How having kids changed you',
+  },
+  {
+    promptText: 'Who were you before you became my parents?',
+    suggestedTitle: 'Who you were before becoming my parents',
+  },
+  {
+    promptText: 'If your time came tomorrow, what is something you would want me to know?',
+    suggestedTitle: "Something you'd want me to know",
+  },
+  {
+    promptText: 'What is your favourite memory of us?',
+    suggestedTitle: 'Your favourite memory of us',
+  },
+  {
+    promptText: 'What was the first year of parenthood like?',
+    suggestedTitle: 'The first year of parenthood',
+  },
+  {
+    promptText: 'What do you want your grandkids to be like?',
+    suggestedTitle: 'What you want your grandkids to be like',
+  },
+  {
+    promptText: 'What have been the best and worst things about growing up?',
+    suggestedTitle: 'Best and worst things about growing up',
+  },
+  {
+    promptText: 'What are you most proud of?',
+    suggestedTitle: "What you're most proud of",
+  },
 ];
 
 function pickRandomPrompt() {
@@ -222,8 +307,6 @@ export default function App() {
   const [detailEditMode, setDetailEditMode] = useState(false);
   const [detailMenuOpen, setDetailMenuOpen] = useState(false);
   const detailMenuRef = useRef(null);
-  const [promptModalOpen, setPromptModalOpen] = useState(false);
-  const [currentStoryPrompt, setCurrentStoryPrompt] = useState(null);
   const [recordingPrompt, setRecordingPrompt] = useState(null);
   const [recordingSuggestedTitle, setRecordingSuggestedTitle] = useState(null);
   const [familyMembers, setFamilyMembers] = useState([]);
@@ -234,7 +317,7 @@ export default function App() {
   const [recordFamilyMemberId, setRecordFamilyMemberId] = useState('');
   const [recordPhotoFile, setRecordPhotoFile] = useState(null);
   const [recordPhotoPreview, setRecordPhotoPreview] = useState(null);
-  const [recordMode, setRecordMode] = useState('voice'); // 'voice' | 'photo'
+  const [recordMode, setRecordMode] = useState('voice'); // 'voice' | 'photo' | 'prompt'
   const [recordModeModalOpen, setRecordModeModalOpen] = useState(false);
   const [editFamilyMemberId, setEditFamilyMemberId] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -267,7 +350,12 @@ export default function App() {
   const draftIdRef = useRef(null);
   const chunkSeqRef = useRef(0);
   const recognitionRef = useRef(null);
+  /** Text from finalized speech segments only (used internally). */
   const currentTranscriptRef = useRef('');
+  /** Latest caption line (finals + trailing interim) — must drive stop-processing so we don't drop words. */
+  const displayTranscriptRef = useRef('');
+  /** Synced before SpeechRecognition start/stop so onend can restart safely on mobile Safari. */
+  const isRecordingRef = useRef(false);
   const recordStartTimeRef = useRef(null);
   const durationIntervalRef = useRef(null);
   const analyserRef = useRef(null);
@@ -276,6 +364,28 @@ export default function App() {
   const recordingSuggestedTitleRef = useRef(null);
   const recordingMimeTypeRef = useRef('audio/webm');
   const recordingStreamRef = useRef(null);
+
+  const startPromptMeRecording = useCallback(() => {
+    const p = pickRandomPrompt();
+    setRecordMode('prompt');
+    setRecordingPrompt(p.promptText);
+    setRecordingSuggestedTitle(p.suggestedTitle);
+    recordingSuggestedTitleRef.current = p.suggestedTitle;
+    setStatus('');
+    setStatusClass('');
+    setShowResults(false);
+    setTranscript('');
+    setTranslation('');
+    setAudioBlob(null);
+    setRecordingDuration(0);
+    setRecordTitle('');
+    setRecordDescription('');
+    setRecordStoryDate('');
+    setRecordFamilyMemberId('');
+    setRecordPhotoFile(null);
+    setRecordPhotoPreview(null);
+    setModalRecordingOpen(true);
+  }, []);
 
   const audioCrossOrigin = useMemo(() => {
     if (typeof window === 'undefined') return undefined;
@@ -360,6 +470,7 @@ export default function App() {
 
   const startRecording = async () => {
     currentTranscriptRef.current = '';
+    displayTranscriptRef.current = '';
     setTranscript('');
     setTranslation('');
     setShowResults(false);
@@ -462,18 +573,33 @@ export default function App() {
         const rec = new SpeechRecognition();
         rec.continuous = true;
         rec.interimResults = true;
-        rec.lang = spokenLanguage === 'korean' ? 'ko-KR' : 'zh-CN';
+        try {
+          rec.maxAlternatives = 5;
+        } catch {
+          /* Some WebKit builds reject non-default maxAlternatives */
+        }
+        const langTag = spokenLanguageRef.current === 'korean' ? 'ko-KR' : 'zh-CN';
+        rec.lang = langTag;
         rec.onresult = (event) => {
-          let final = '';
-          let interim = '';
-          for (let i = event.resultIndex; i < event.results.length; i++) {
+          const finalParts = [];
+          for (let i = 0; i < event.results.length; i++) {
             const r = event.results[i];
-            const t = r[0].transcript;
-            if (r.isFinal) final += t;
-            else interim += t;
+            if (!r.isFinal) continue;
+            const t = pickBestSpeechAlternative(r);
+            if (t) finalParts.push(t);
           }
-          currentTranscriptRef.current = (currentTranscriptRef.current + final).replace(/\s+/g, ' ').trim();
-          setTranscript(currentTranscriptRef.current + (interim ? ' ' + interim : ''));
+          let interimStr = '';
+          if (event.results.length > 0) {
+            const last = event.results[event.results.length - 1];
+            if (!last.isFinal) {
+              interimStr = pickBestSpeechAlternative(last).replace(/\s+/g, ' ').trim();
+            }
+          }
+          const normFinal = finalParts.join('').replace(/\s+/g, ' ').trim();
+          currentTranscriptRef.current = normFinal;
+          const display = normFinal + (interimStr ? (normFinal ? ' ' : '') + interimStr : '');
+          displayTranscriptRef.current = display;
+          setTranscript(display);
         };
         rec.onerror = (e) => {
           if (e.error === 'aborted') return;
@@ -485,9 +611,28 @@ export default function App() {
             setStatus('Live captions may not work in this browser; recording still works.');
           }
         };
-        rec.start();
-        recognitionRef.current = rec;
+        rec.onend = () => {
+          if (!isRecordingRef.current) return;
+          if (recognitionRef.current !== rec) return;
+          try {
+            rec.start();
+          } catch {
+            // InvalidStateError: already running — ignore
+          }
+        };
+        try {
+          rec.start();
+          recognitionRef.current = rec;
+        } catch (recErr) {
+          recognitionRef.current = null;
+          setStatus(
+            isKo
+              ? '음성 인식을 시작하지 못했어요. 크롬/엣지에서 다시 시도해 보세요. 녹음은 계속됩니다.'
+              : 'Could not start speech recognition. Try Chrome or Edge. Audio recording still works.',
+          );
+        }
       } else {
+        displayTranscriptRef.current = '…';
         setTranscript('…');
         setStatus(
           isKo
@@ -496,10 +641,11 @@ export default function App() {
         );
       }
 
+      isRecordingRef.current = true;
       setIsRecording(true);
       setRecordingDuration(0);
       recordStartTimeRef.current = Date.now();
-      if (SpeechRecognition) setStatus('');
+      if (SpeechRecognition && recognitionRef.current) setStatus('');
     } catch (err) {
       recordingStreamRef.current = null;
       setStatus(formatMicAccessError(err, isKo));
@@ -593,11 +739,35 @@ export default function App() {
     const mediaRecorder = mediaRecorderRef.current;
     if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
 
+    isRecordingRef.current = false;
     setIsRecording(false);
-    setStatus('Processing…', 'processing');
+    setStatus('Processing…');
+    setStatusClass('processing');
 
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
+    const rec = recognitionRef.current;
+    if (rec) {
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        const timer = setTimeout(finish, 600);
+        const onRecEnd = () => {
+          clearTimeout(timer);
+          rec.removeEventListener('end', onRecEnd);
+          finish();
+        };
+        rec.addEventListener('end', onRecEnd, { once: true });
+        try {
+          rec.stop();
+        } catch {
+          clearTimeout(timer);
+          rec.removeEventListener('end', onRecEnd);
+          finish();
+        }
+      });
       recognitionRef.current = null;
     }
 
@@ -611,7 +781,13 @@ export default function App() {
         }
         audioContextRef.current = null;
 
-        const raw = (currentTranscriptRef.current || transcript).replace(/^…\s*/, '').trim();
+        await new Promise((r) => {
+          requestAnimationFrame(() => requestAnimationFrame(r));
+        });
+
+        const raw = (displayTranscriptRef.current || currentTranscriptRef.current)
+          .replace(/^…\s*/, '')
+          .trim();
         const finalTranscript = raw || '(No speech detected)';
         setTranscript(finalTranscript);
 
@@ -631,6 +807,7 @@ export default function App() {
         const blob = chunks.length ? new Blob(chunks, { type: mime }) : null;
         setAudioBlob(blob);
         setShowResults(true);
+        setStatusClass('');
         setStatus('Done. Save or discard.');
         if (recordingSuggestedTitleRef.current) {
           setRecordTitle(recordingSuggestedTitleRef.current);
@@ -798,6 +975,7 @@ export default function App() {
 
   const handleDiscard = () => {
     if (isRecording) {
+      isRecordingRef.current = false;
       setIsRecording(false);
       if (recognitionRef.current) {
         recognitionRef.current.stop();
@@ -966,6 +1144,14 @@ export default function App() {
             aria-label="Record"
           >
             {isKo ? '녹음하기' : 'Record'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-guided"
+            onClick={startPromptMeRecording}
+            aria-label={isKo ? '질문 받고 녹음' : 'Prompt me'}
+          >
+            {isKo ? '질문 받기' : 'Prompt me'}
           </button>
           <div className="header-more-wrap" ref={moreMenuRef}>
             <button
@@ -1357,7 +1543,13 @@ export default function App() {
 
       <section className="saved-section">
         <ul className="saved-list" aria-label="Saved recordings">
-          {savedList.length === 0 && <li className="empty-list">Nothing saved yet. Tap Record to get started.</li>}
+          {savedList.length === 0 && (
+            <li className="empty-list">
+              {isKo
+                ? '아직 저장된 게 없어요. 녹음하기나 질문 받기를 눌러 시작해 보세요.'
+                : 'Nothing saved yet. Tap Record or Prompt me to get started.'}
+            </li>
+          )}
           {savedList.map((r) => {
             const rawTitle = r.title?.trim() || formatCardTimestamp(r.createdAt);
             const displayTitle = rawTitle.length > 25 ? rawTitle.slice(0, 25) + '...' : rawTitle;
@@ -1393,57 +1585,6 @@ export default function App() {
         </ul>
       </section>
 
-      {promptModalOpen && currentStoryPrompt && (
-        <div
-          className="modal modal-prompt-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="promptModalTitle"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setPromptModalOpen(false);
-              setCurrentStoryPrompt(null);
-            }
-          }}
-        >
-          <div className="modal-content modal-prompt">
-            <h2 id="promptModalTitle" className="modal-prompt-title">
-              {currentStoryPrompt.promptText}
-            </h2>
-            <div className="modal-prompt-actions">
-              <button
-                type="button"
-                className="btn btn-prompt-start"
-                onClick={() => {
-                  setRecordMode('voice');
-                  setRecordingPrompt(currentStoryPrompt.promptText);
-                  setRecordingSuggestedTitle(currentStoryPrompt.suggestedTitle);
-                  recordingSuggestedTitleRef.current = currentStoryPrompt.suggestedTitle;
-                  setPromptModalOpen(false);
-                  setCurrentStoryPrompt(null);
-                  setModalRecordingOpen(true);
-                  setStatus('');
-                  setStatusClass('');
-                  setShowResults(false);
-                  setTranscript('');
-                  setTranslation('');
-                  setAudioBlob(null);
-                  setRecordingDuration(0);
-                  setRecordTitle('');
-                  setRecordDescription('');
-                  setRecordStoryDate('');
-                  setRecordFamilyMemberId('');
-                  setRecordPhotoFile(null);
-                  setRecordPhotoPreview(null);
-                }}
-              >
-                Start recording
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {modalRecordingOpen && (
         <div
           className="modal modal-recording-backdrop modal-no-dismiss"
@@ -1454,7 +1595,13 @@ export default function App() {
           <div className="modal-recording">
             <header className="modal-recording-header">
               <h2 id="recordModalTitle">
-                {recordMode === 'photo' ? 'Record about this photo' : 'Record'}
+                {recordMode === 'photo'
+                  ? 'Record about this photo'
+                  : recordMode === 'prompt'
+                    ? isKo
+                      ? '질문에 답하기'
+                      : 'Answer the prompt'
+                    : 'Record'}
               </h2>
               <button
                 type="button"
