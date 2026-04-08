@@ -13,6 +13,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const WAITLIST_FILE = path.join(__dirname, 'waitlist.json');
 
 function ensureDirs() {
   if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -22,6 +23,33 @@ function ensureFamilyUploadDir(familyId) {
   const dir = path.join(UPLOAD_DIR, familyId);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  const e = normalizeEmail(email);
+  if (!e || e.length > 320) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
+function readWaitlist() {
+  try {
+    if (!fs.existsSync(WAITLIST_FILE)) return [];
+    const raw = fs.readFileSync(WAITLIST_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeWaitlist(list) {
+  const tmp = `${WAITLIST_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 2), 'utf8');
+  fs.renameSync(tmp, WAITLIST_FILE);
 }
 
 /** Explicit types so Safari/iOS can play media from <audio>/<img> (Range + correct MIME). */
@@ -88,6 +116,34 @@ function toFamilyMemberRow(row) {
 
 app.use(cors({ origin: true }));
 app.use(express.json());
+
+// ---------- Waitlist (public) ----------
+app.post('/api/waitlist', (req, res) => {
+  try {
+    const { email, source } = req.body || {};
+    const normalized = normalizeEmail(email);
+    if (!isValidEmail(normalized)) {
+      return res.status(400).json({ error: 'Invalid email' });
+    }
+
+    const list = readWaitlist();
+    const exists = list.some((r) => normalizeEmail(r?.email) === normalized);
+    if (exists) return res.status(200).json({ ok: true, already: true });
+
+    list.unshift({
+      email: normalized,
+      createdAt: new Date().toISOString(),
+      source: (source || '').toString().slice(0, 120) || 'unknown',
+      ip: (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().slice(0, 120),
+      userAgent: (req.headers['user-agent'] || '').toString().slice(0, 240),
+    });
+    writeWaitlist(list);
+    return res.status(201).json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to join waitlist' });
+  }
+});
 
 // ---------- Families (no slug; creates a new family) ----------
 app.post('/api/families', async (req, res) => {

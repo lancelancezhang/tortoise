@@ -16,6 +16,17 @@ export async function createFamily(body = {}) {
   return res.json();
 }
 
+export async function joinWaitlist({ email, source } = {}) {
+  const res = await fetch(`${API_BASE}/api/waitlist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, source }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || 'Failed to join waitlist');
+  return data;
+}
+
 export async function listRecordings(familySlug) {
   const res = await fetch(`${familyApi(familySlug)}/recordings`);
   if (!res.ok) throw new Error('Failed to fetch recordings');
