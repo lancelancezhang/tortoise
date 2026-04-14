@@ -24,9 +24,15 @@ export default function LandingWaitlist() {
     try {
       const res = await joinWaitlist({ email: trimmed, source: 'landing' });
       if (res?.already) {
-        setStatus({ state: 'success', message: "You're already on the list. We'll email you when invites open." });
+        setStatus({
+          state: 'success',
+          message: "You're already on the list. TortoiseAI will email you when invites open.",
+        });
       } else {
-        setStatus({ state: 'success', message: "You're in. We'll send your invite when we open the next cohort." });
+        setStatus({
+          state: 'success',
+          message: "You're in. TortoiseAI will send your invite when the next cohort opens.",
+        });
       }
     } catch (err) {
       setStatus({ state: 'error', message: err?.message || 'Something went wrong. Please try again.' });
@@ -38,7 +44,7 @@ export default function LandingWaitlist() {
       <header className="landing-header">
         <div className="landing-brand">
           <span className="landing-mark" aria-hidden>🐢</span>
-          <span className="landing-name">Tortoise</span>
+          <span className="landing-name">TortoiseAI</span>
         </div>
       </header>
 
@@ -46,37 +52,37 @@ export default function LandingWaitlist() {
         <section className="landing-hero" aria-labelledby="landingTitle">
           <div className="landing-hero-left">
             <h1 id="landingTitle" className="landing-title">
-              Have real conversations with your parents—without sharing a language.
+              One day, you’ll wish you asked more
             </h1>
             <p className="landing-subtitle">
-              Tortoise turns voice memories into a private, searchable family archive—with live translation and guided prompts
-              for bilingual households.
+              TortoiseAI helps immigrant families have meaningful conversations and turns them into a searchable, multilingual family
+              legacy.
             </p>
+            <p className="landing-hero-punch">Before it’s too late.</p>
 
             <div className="landing-waitlist-box">
               <form className="landing-form" onSubmit={submit}>
                 <label className="landing-label" htmlFor="waitlistEmail">
                   Get an invite
                 </label>
-                <div className="landing-form-row">
-                  <input
-                    id="waitlistEmail"
-                    className="landing-input"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    aria-describedby="waitlistHelp waitlistStatus"
-                  />
-                  <button className="landing-cta" type="submit" disabled={!canSubmit}>
-                    {status.state === 'loading' ? 'Saving…' : 'Save my spot'}
-                  </button>
+                <div className="landing-field-merge">
+                  <div className="landing-form-row">
+                    <input
+                      id="waitlistEmail"
+                      className="landing-input"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      aria-describedby="waitlistStatus"
+                    />
+                    <button className="landing-cta" type="submit" disabled={!canSubmit}>
+                      {status.state === 'loading' ? 'Saving…' : 'Save my spot'}
+                    </button>
+                  </div>
                 </div>
-                <p id="waitlistHelp" className="landing-help">
-                  We’ll email when invites open. No spam.
-                </p>
                 <p
                   id="waitlistStatus"
                   className={`landing-status ${status.state === 'success' ? 'is-success' : status.state === 'error' ? 'is-error' : ''}`}
@@ -87,50 +93,34 @@ export default function LandingWaitlist() {
               </form>
             </div>
           </div>
-
-          <div className="landing-hero-right" aria-hidden>
-            <div className="landing-card">
-              <div className="landing-card-kicker">From conversation → keepsake in minutes</div>
-              <div className="landing-card-title">A private, multilingual family archive</div>
-              <ul className="landing-card-list">
-                <li>Guided prompts that unlock the stories you wish you’d asked</li>
-                <li>Live translation so both sides feel understood</li>
-                <li>Automatic transcripts you can polish into a story</li>
-                <li>A private library you can search and share</li>
-              </ul>
-              <div className="landing-card-foot">
-                Optional printed book for a physical keepsake.
-              </div>
-            </div>
-          </div>
         </section>
 
-        <section className="landing-section" aria-labelledby="problemTitle">
-          <h2 id="problemTitle" className="landing-h2">The problem</h2>
-          <p className="landing-p">
-            When grandparents pass, their stories often go with them—because it’s hard to ask across languages.
-          </p>
-          <div className="landing-grid">
-            <div className="landing-chip">Language barriers</div>
-            <div className="landing-chip">No prompts</div>
-            <div className="landing-chip">Awkward to record</div>
-            <div className="landing-chip">Time-consuming</div>
-          </div>
+        <section className="landing-section landing-section--benefits" aria-labelledby="benefitsTitle">
+          <h2 id="benefitsTitle" className="landing-h2 landing-benefits-title">
+            What TortoiseAI preserves for you
+          </h2>
+          <ul className="landing-benefits">
+            <li>Hear your mum tell childhood stories in her own voice, forever.</li>
+            <li>Read your dad’s life story, written beautifully from a single conversation.</li>
+            <li>Share those stories with your kids when the time comes.</li>
+            <li>Keep every memory safe, so nothing important slips away.</li>
+          </ul>
         </section>
 
         <section className="landing-section" aria-labelledby="howTitle">
-          <h2 id="howTitle" className="landing-h2">How Tortoise works</h2>
+          <h2 id="howTitle" className="landing-h2">How TortoiseAI works</h2>
           <ol className="landing-steps">
             <li><span>1</span>Pick a prompt</li>
             <li><span>2</span>Talk naturally (any language)</li>
-            <li><span>3</span>We translate + transcribe</li>
+            <li><span>3</span>TortoiseAI translates + transcribes</li>
             <li><span>4</span>Save to your private library</li>
+            <li><span>5</span>View precious memories at any time</li>
           </ol>
         </section>
       </main>
 
       <footer className="landing-footer">
-        <span>© {new Date().getFullYear()} Tortoise</span>
+        <span>© {new Date().getFullYear()} TortoiseAI</span>
       </footer>
     </div>
   );

@@ -116,6 +116,10 @@ function getTimestampName() {
 
 const LANGPAIR = { mandarin: 'zh-CN|en', korean: 'ko|en' };
 
+function transcriptionLabelForSpoken(spokenLanguage) {
+  return spokenLanguage === 'korean' ? 'Transcription (Korean)' : 'Transcription (Mandarin)';
+}
+
 /** MyMemory free tier works better under ~500 chars per request; split without breaking UTF-16. */
 function splitTextForTranslation(text, maxLen = 450) {
   const t = text.trim();
@@ -181,30 +185,24 @@ function pickBestSpeechAlternative(result) {
   return (result[bestIdx]?.transcript || '').trim();
 }
 
-function formatMicAccessError(err, isKo) {
+function formatMicAccessError(err) {
   const name = err?.name || '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-    return isKo
-      ? '마이크가 꺼져 있어요. 주소창의 자물쇠(ⓘ)를 눌러 마이크를 허용해 주세요.'
-      : 'Microphone access was denied. Use the lock or (i) icon in the address bar and allow the microphone for this site.';
+    return 'Microphone access was denied. Use the lock or (i) icon in the address bar and allow the microphone for this site.';
   }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-    return isKo ? '마이크를 찾을 수 없어요.' : 'No microphone was found.';
+    return 'No microphone was found.';
   }
   if (name === 'NotReadableError' || name === 'TrackStartError') {
-    return isKo
-      ? '마이크를 쓸 수 없어요. 다른 앱이 마이크를 쓰는지 확인해 주세요.'
-      : 'Microphone is busy or unavailable. Close other apps using the mic and try again.';
+    return 'Microphone is busy or unavailable. Close other apps using the mic and try again.';
   }
   if (!window.isSecureContext) {
-    return isKo ? '마이크를 쓰려면 HTTPS로 접속해야 해요.' : 'Open this page over HTTPS (not http://) to use the microphone.';
+    return 'Open this page over HTTPS (not http://) to use the microphone.';
   }
   if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
-    return isKo ? '이 기기에서 마이크 설정을 맞출 수 없어요.' : 'Your microphone does not support the required settings.';
+    return 'Your microphone does not support the required settings.';
   }
-  return isKo
-    ? `녹음을 시작할 수 없어요 (${name || '오류'}).`
-    : `Could not start recording (${name || err?.message || 'unknown error'}).`;
+  return `Could not start recording (${name || err?.message || 'unknown error'}).`;
 }
 
 /** Safari / iOS only supports recording MP4 (AAC); Chrome uses WebM/Opus. */
@@ -336,14 +334,6 @@ export default function App() {
     }
   });
   const spokenLanguageRef = useRef(spokenLanguage);
-  const [uiLanguage, setUiLanguage] = useState(() => {
-    try {
-      return localStorage.getItem('uiLanguage') || 'en';
-    } catch {
-      return 'en';
-    }
-  });
-  const isKo = uiLanguage === 'ko';
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -447,12 +437,6 @@ export default function App() {
   }, [spokenLanguage]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('uiLanguage', uiLanguage);
-    } catch {}
-  }, [uiLanguage]);
-
-  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -488,11 +472,7 @@ export default function App() {
     }).catch(() => {});
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setStatus(
-        isKo
-          ? '이 브라우저에서는 마이크를 사용할 수 없어요.'
-          : 'Microphone is not available in this browser or context.',
-      );
+      setStatus('Microphone is not available in this browser or context.');
       return;
     }
 
@@ -605,11 +585,7 @@ export default function App() {
           if (e.error === 'aborted') return;
           // Mic already works here; Web Speech often reports not-allowed on iOS/Safari — do not blame the microphone.
           if (e.error === 'no-speech') return;
-          if (isKo) {
-            setStatus('실시간 받아쓰기에 문제가 있을 수 있어요. 녹음은 계속됩니다.');
-          } else {
-            setStatus('Live captions may not work in this browser; recording still works.');
-          }
+          setStatus('');
         };
         rec.onend = () => {
           if (!isRecordingRef.current) return;
@@ -625,20 +601,12 @@ export default function App() {
           recognitionRef.current = rec;
         } catch (recErr) {
           recognitionRef.current = null;
-          setStatus(
-            isKo
-              ? '음성 인식을 시작하지 못했어요. 크롬/엣지에서 다시 시도해 보세요. 녹음은 계속됩니다.'
-              : 'Could not start speech recognition. Try Chrome or Edge. Audio recording still works.',
-          );
+          setStatus('Could not start speech recognition. Try Chrome or Edge. Audio recording still works.');
         }
       } else {
         displayTranscriptRef.current = '…';
         setTranscript('…');
-        setStatus(
-          isKo
-            ? '이 브라우저는 실시간 받아쓰기를 지원하지 않아요. 녹음 후 텍스트를 직접 적을 수 있어요.'
-            : 'Live transcription is not available in this browser. You can still record and type notes after.',
-        );
+        setStatus('');
       }
 
       isRecordingRef.current = true;
@@ -648,7 +616,7 @@ export default function App() {
       if (SpeechRecognition && recognitionRef.current) setStatus('');
     } catch (err) {
       recordingStreamRef.current = null;
-      setStatus(formatMicAccessError(err, isKo));
+      setStatus(formatMicAccessError(err));
     }
   };
 
@@ -839,17 +807,17 @@ export default function App() {
       const mime = meta?.recordingMime || recoverableDraft.recordingMime || 'audio/webm';
       const blob = blobs.length ? new Blob(blobs, { type: mime }) : null;
       if (!blob) {
-        setStatus(isKo ? '복구할 녹음 파일이 없어요.' : 'No audio found to recover.');
+        setStatus('No audio found to recover.');
         return;
       }
       setAudioBlob(blob);
       setShowResults(true);
       setModalRecordingOpen(true);
-      setStatus(isKo ? '이전 녹음을 복구했어요. 저장하거나 버릴 수 있어요.' : 'Recovered the last recording. You can save or discard.');
+      setStatus('Recovered the last recording. You can save or discard.');
     } catch {
-      setStatus(isKo ? '복구에 실패했어요.' : 'Recovery failed.');
+      setStatus('Recovery failed.');
     }
-  }, [recoverableDraft, isKo]);
+  }, [recoverableDraft]);
 
   const handleSave = async () => {
     const titleTrimmed = recordTitle.trim();
@@ -1133,7 +1101,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🐢 TortoiseAI</h1>
+        <div className="app-header-spacer" aria-hidden />
         <div className="app-header-actions">
           <button
             type="button"
@@ -1143,15 +1111,15 @@ export default function App() {
             }}
             aria-label="Record"
           >
-            {isKo ? '녹음하기' : 'Record'}
+            Record
           </button>
           <button
             type="button"
             className="btn btn-guided"
             onClick={startPromptMeRecording}
-            aria-label={isKo ? '질문 받고 녹음' : 'Prompt me'}
+            aria-label="Prompt me"
           >
-            {isKo ? '질문 받기' : 'Prompt me'}
+            Prompt me
           </button>
           <div className="header-more-wrap" ref={moreMenuRef}>
             <button
@@ -1175,7 +1143,7 @@ export default function App() {
                     setOptionsModalOpen(true);
                   }}
                 >
-                  {isKo ? '언어 변경' : 'Change language'}
+                  Settings
                 </button>
                 <button
                   type="button"
@@ -1193,7 +1161,7 @@ export default function App() {
                     setConfirmDeleteFamilyId(null);
                   }}
                 >
-                  {isKo ? '가족 관리' : 'Manage family'}
+                  Manage family
                 </button>
               </div>
             )}
@@ -1211,7 +1179,7 @@ export default function App() {
         >
           <div className="modal-content modal-import">
             <header className="modal-import-header">
-              <h2 id="optionsModalTitle">{isKo ? '언어 설정' : 'Change language'}</h2>
+              <h2 id="optionsModalTitle">Recording settings</h2>
               <button
                 type="button"
                 className="modal-close-x"
@@ -1224,36 +1192,21 @@ export default function App() {
             <div className="import-form">
               <div className="result-section">
                 <label className="result-label" htmlFor="options-spoken-language">
-                  {isKo ? '녹음할 언어' : 'Spoken language'}
+                  Spoken language
                 </label>
                 <select
                   id="options-spoken-language"
                   className="input-field"
                   value={spokenLanguage}
                   onChange={(e) => setSpokenLanguage(e.target.value)}
-                  aria-label={isKo ? '녹음할 때 말할 언어' : 'Language you will speak when recording'}
+                  aria-label="Language you will speak when recording"
                 >
-                  <option value="mandarin">{isKo ? '중국어' : 'Mandarin'}</option>
-                  <option value="korean">{isKo ? '한국어' : 'Korean'}</option>
+                  <option value="mandarin">Mandarin</option>
+                  <option value="korean">Korean</option>
                 </select>
                 <p className="input-hint">
-                  {isKo ? '녹음은 받아 적은 후 영어로 번역돼요.' : 'Recordings will be transcribed and translated to English.'}
+                  Recordings will be transcribed and translated to English.
                 </p>
-              </div>
-              <div className="result-section">
-                <label className="result-label" htmlFor="options-ui-language">
-                  {isKo ? '앱 언어' : 'Interface language'}
-                </label>
-                <select
-                  id="options-ui-language"
-                  className="input-field"
-                  value={uiLanguage}
-                  onChange={(e) => setUiLanguage(e.target.value)}
-                  aria-label={isKo ? '앱 화면 언어' : 'Language of the app interface'}
-                >
-                  <option value="en">English</option>
-                  <option value="ko">한국어</option>
-                </select>
               </div>
             </div>
           </div>
@@ -1270,7 +1223,7 @@ export default function App() {
         >
           <div className="modal-content modal-import modal-onboarding">
             <header className="modal-import-header">
-              <h2 id="onboardingTitle">{isKo ? '가족 관리' : 'Manage family'}</h2>
+              <h2 id="onboardingTitle">Manage family</h2>
               <button
                 type="button"
                 className="modal-close-x"
@@ -1283,7 +1236,7 @@ export default function App() {
             <div className="onboarding-list">
               {familyMembers.length === 0 ? (
                 <p className="onboarding-list-empty">
-                  {isKo ? '아직 추가된 가족이 없어요' : 'No family members yet'}
+                  No family members yet
                 </p>
               ) : (
                 <ul className="onboarding-family-list" aria-label="Family members">
@@ -1300,7 +1253,7 @@ export default function App() {
                         {confirmDeleteFamilyId === fm.id ? (
                           <>
                             <span className="onboarding-delete-prompt">
-                              {isKo ? '삭제할까요?' : 'Delete?'}
+                              Delete?
                             </span>
                             <button
                               type="button"
@@ -1308,7 +1261,7 @@ export default function App() {
                               onClick={() => handleDeleteFamilyMember(fm.id)}
                               aria-label="Confirm delete"
                             >
-                              {isKo ? '네' : 'Yes'}
+                              Yes
                             </button>
                             <button
                               type="button"
@@ -1316,7 +1269,7 @@ export default function App() {
                               onClick={() => setConfirmDeleteFamilyId(null)}
                               aria-label="Cancel delete"
                             >
-                              {isKo ? '아니요' : 'No'}
+                              No
                             </button>
                           </>
                         ) : (
@@ -1385,7 +1338,7 @@ export default function App() {
         >
           <div className="modal-content modal-mode">
             <h2 id="recordModeTitle" className="modal-prompt-title">
-              {isKo ? '어떻게 녹음할까요?' : 'How would you like to record?'}
+              How would you like to record?
             </h2>
             <div className="modal-mode-options">
               <button
@@ -1413,7 +1366,7 @@ export default function App() {
                   setModalRecordingOpen(true);
                 }}
               >
-                {isKo ? '음성만' : 'Voice-only'}
+                Voice-only
               </button>
               <button
                 type="button"
@@ -1440,7 +1393,7 @@ export default function App() {
                   setModalRecordingOpen(true);
                 }}
               >
-                {isKo ? '사진 + 음성' : 'Photo + voice'}
+                Photo + voice
               </button>
             </div>
           </div>
@@ -1545,9 +1498,7 @@ export default function App() {
         <ul className="saved-list" aria-label="Saved recordings">
           {savedList.length === 0 && (
             <li className="empty-list">
-              {isKo
-                ? '아직 저장된 게 없어요. 녹음하기나 질문 받기를 눌러 시작해 보세요.'
-                : 'Nothing saved yet. Tap Record or Prompt me to get started.'}
+              Nothing saved yet. Tap Record or Prompt me to get started.
             </li>
           )}
           {savedList.map((r) => {
@@ -1598,9 +1549,7 @@ export default function App() {
                 {recordMode === 'photo'
                   ? 'Record about this photo'
                   : recordMode === 'prompt'
-                    ? isKo
-                      ? '질문에 답하기'
-                      : 'Answer the prompt'
+                    ? 'Answer the prompt'
                     : 'Record'}
               </h2>
               <button
@@ -1645,9 +1594,7 @@ export default function App() {
                       )}
                       {typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) && (
                         <p className="recording-mobile-tip" role="status">
-                          {isKo
-                            ? '휴대폰: 녹음 전에 채팅 말풍선·띄워 둔 앱을 닫으면 더 잘 돼요.'
-                            : 'On phones: close chat bubbles or floating apps before recording for best results.'}
+                          On phones: close chat bubbles or floating apps before recording for best results.
                         </p>
                       )}
                       <div className="recording-voice-block">
@@ -1670,7 +1617,7 @@ export default function App() {
 
                       <div className="recording-transcript-block">
                     <span className="recording-transcript-label">
-                      {isKo ? '받아 적기' : 'Transcription'}
+                      {transcriptionLabelForSpoken(spokenLanguage)}
                     </span>
                         <div className="recording-transcript">
                           {isRecording && transcript}
@@ -1685,7 +1632,7 @@ export default function App() {
                             className="btn btn-secondary recording-recover"
                             onClick={recoverLastRecording}
                           >
-                            {isKo ? '이전 녹음 복구' : 'Recover last recording'}
+                            Recover last recording
                           </button>
                         )}
                         <button
@@ -1768,22 +1715,22 @@ export default function App() {
                   </div>
                   <div className="result-section">
                     <span className="result-label">
-                      {isKo ? '받아 적기' : 'Transcription'}
+                      {transcriptionLabelForSpoken(spokenLanguage)}
                     </span>
                     <p className="result-text">{transcript}</p>
                   </div>
                   <div className="result-section">
                     <span className="result-label">
-                      {isKo ? '번역' : 'Translation'}
+                      Translation
                     </span>
                     <p className="result-text">{translation}</p>
                   </div>
                   <div className="result-actions result-actions-save-discard">
                     <button type="button" className="btn btn-save" onClick={handleSave}>
-                      {isKo ? '저장' : 'Save'}
+                      Save
                     </button>
                     <button type="button" className="btn btn-discard" onClick={() => setConfirmDiscardOpen(true)}>
-                      {isKo ? '버리기' : 'Discard'}
+                      Discard
                     </button>
                   </div>
                 </div>
@@ -1858,7 +1805,7 @@ export default function App() {
                             setDetailMenuOpen(false);
                           }}
                         >
-                          {isKo ? '편집' : 'Edit'}
+                          Edit
                         </button>
                         <button
                           type="button"
@@ -1869,7 +1816,7 @@ export default function App() {
                             setDetailMenuOpen(false);
                           }}
                         >
-                          {isKo ? '삭제' : 'Delete'}
+                          Delete
                         </button>
                       </div>
                     )}
@@ -1896,7 +1843,7 @@ export default function App() {
                   <>
                     <div className="modal-detail-when-row">
                       <label className="modal-detail-when-label" htmlFor="modal-detail-date">
-                        {isKo ? '언제 있었던 일인지' : 'When it happened'}
+                        When it happened
                       </label>
                       <input
                         id="modal-detail-date"
@@ -1904,19 +1851,19 @@ export default function App() {
                         className="input-field input-field-date"
                         value={editStoryDate}
                         onChange={(e) => setEditStoryDate(e.target.value)}
-                        aria-label={isKo ? '언제 있었던 일인지' : 'When it happened'}
+                        aria-label="When it happened"
                       />
                     </div>
                     <div className="modal-detail-when-row">
                       <label className="modal-detail-when-label" htmlFor="modal-detail-family">
-                        {isKo ? '기록한 사람' : 'Author'}
+                        Author
                       </label>
                       <select
                         id="modal-detail-family"
                         className="input-field input-field-date"
                         value={editFamilyMemberId}
                         onChange={(e) => setEditFamilyMemberId(e.target.value)}
-                        aria-label={isKo ? '기록한 사람' : 'Author'}
+                        aria-label="Author"
                       >
                         <option value="">None</option>
                         {familyMembers.map((fm) => (
@@ -1926,7 +1873,7 @@ export default function App() {
                     </div>
                     <textarea
                       className="modal-detail-description-input"
-                      placeholder={isKo ? '간단한 설명 (선택)' : 'Brief description (optional)'}
+                      placeholder="Brief description (optional)"
                       rows={3}
                       value={editDescription}
                       onChange={(e) => setEditDescription(e.target.value)}
@@ -1953,7 +1900,7 @@ export default function App() {
                     <div className="modal-detail-description-view">
                       {modalRecord.description?.trim() || (
                     <span className="modal-detail-description-empty">
-                      {isKo ? '설명이 없어요' : 'No description'}
+                      No description
                     </span>
                       )}
                     </div>
@@ -1977,39 +1924,39 @@ export default function App() {
                     try {
                       await downloadRecordingAsFile(getAudioUrl(familySlug, modalRecord.id), base);
                     } catch {
-                      setToastMessage(isKo ? '다운로드에 실패했어요.' : 'Download failed.');
+                      setToastMessage('Download failed.');
                       setTimeout(() => setToastMessage(''), 2500);
                     }
                   }}
                 >
-                  {isKo ? '녹음 파일 다운로드' : 'Download recording'}
+                  Download recording
                 </button>
                 <p className="modal-detail-recorded">
-                  {isKo ? '녹음 시간 ' : 'Recorded '}
+                  Recorded{' '}
                   {formatCardTimestamp(modalRecord.createdAt)}
                 </p>
               </div>
             ) : (
               <p className="modal-detail-recorded modal-detail-recorded-standalone">
-                {isKo ? '녹음 시간 ' : 'Recorded '}
+                Recorded{' '}
                 {formatCardTimestamp(modalRecord.createdAt)}
               </p>
             )}
             <div className="result-block">
-              <label>{isKo ? '원문 (중국어)' : 'Transcription (Mandarin)'}</label>
+              <label>Transcription</label>
               <p className="text-block">{modalRecord.transcript || '—'}</p>
             </div>
             <div className="result-block">
-              <label>{isKo ? '번역 (영어)' : 'Translation (English)'}</label>
+              <label>Translation (English)</label>
               <p className="text-block">{modalRecord.translation || '—'}</p>
             </div>
             {detailEditMode && (
               <div className="modal-detail-actions">
                 <button type="button" className="btn btn-save" onClick={handleSaveDetailChanges}>
-                  {isKo ? '변경 사항 저장' : 'Save changes'}
+                  Save changes
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={handleCancelDetailEdit}>
-                  {isKo ? '취소' : 'Cancel'}
+                  Cancel
                 </button>
               </div>
             )}
@@ -2017,14 +1964,14 @@ export default function App() {
               <div className="confirm-popup-overlay" onClick={(e) => e.stopPropagation()}>
                 <div className="confirm-popup">
                   <p className="confirm-popup-text">
-                    {isKo ? '이 녹음을 정말 삭제할까요?' : 'Are you sure you want to delete this recording?'}
+                    Are you sure you want to delete this recording?
                   </p>
                   <div className="confirm-popup-actions">
                     <button type="button" className="btn btn-discard-confirm" onClick={handleDeleteRecording}>
-                      {isKo ? '네, 삭제할게요' : 'Yes, delete'}
+                      Yes, delete
                     </button>
                     <button type="button" className="btn btn-secondary" onClick={() => setConfirmDeleteId(null)}>
-                      {isKo ? '아니요' : 'No'}
+                      No
                     </button>
                   </div>
                 </div>
@@ -2045,14 +1992,14 @@ export default function App() {
         >
           <div className="modal-content" style={{ maxWidth: '320px' }} onClick={(e) => e.stopPropagation()}>
             <p id="confirmDiscardChangesTitle" className="confirm-popup-text">
-              {isKo ? '지금까지 수정한 내용을 버릴까요?' : 'Are you sure you want to discard your changes?'}
+              Are you sure you want to discard your changes?
             </p>
             <div className="confirm-popup-actions">
               <button type="button" className="btn btn-discard-confirm" onClick={handleConfirmDiscardChanges}>
-                {isKo ? '네, 버릴게요' : 'Yes, discard'}
+                Yes, discard
               </button>
               <button type="button" className="btn btn-secondary" onClick={() => setConfirmDiscardChangesOpen(false)}>
-                {isKo ? '아니요' : 'No'}
+                No
               </button>
             </div>
           </div>
