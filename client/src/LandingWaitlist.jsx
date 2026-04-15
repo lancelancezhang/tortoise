@@ -31,7 +31,7 @@ export default function LandingWaitlist() {
       } else {
         setStatus({
           state: 'success',
-          message: "You're in. TortoiseAI will send your invite when the next cohort opens.",
+          message: "You're in!",
         });
       }
     } catch (err) {

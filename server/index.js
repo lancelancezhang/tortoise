@@ -118,7 +118,7 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 
 // ---------- Waitlist (public) ----------
-app.post('/api/waitlist', (req, res) => {
+app.post('/api/waitlist', async (req, res) => {
   try {
     const { email, source } = req.body || {};
     const normalized = normalizeEmail(email);
@@ -126,17 +126,29 @@ app.post('/api/waitlist', (req, res) => {
       return res.status(400).json({ error: 'Invalid email' });
     }
 
+    const row = {
+      email: normalized,
+      source: (source || '').toString().slice(0, 120) || 'unknown',
+      ip: (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().slice(0, 120),
+      user_agent: (req.headers['user-agent'] || '').toString().slice(0, 240),
+    };
+
+    // Prefer Supabase when configured; keep local JSON fallback for dev.
+    if (isSupabaseConfigured()) {
+      const { error } = await supabase.from('waitlist_signups').insert(row);
+      if (error) {
+        // Postgres unique_violation
+        if (error.code === '23505') return res.status(200).json({ ok: true, already: true });
+        throw error;
+      }
+      return res.status(201).json({ ok: true });
+    }
+
     const list = readWaitlist();
     const exists = list.some((r) => normalizeEmail(r?.email) === normalized);
     if (exists) return res.status(200).json({ ok: true, already: true });
 
-    list.unshift({
-      email: normalized,
-      createdAt: new Date().toISOString(),
-      source: (source || '').toString().slice(0, 120) || 'unknown',
-      ip: (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().slice(0, 120),
-      userAgent: (req.headers['user-agent'] || '').toString().slice(0, 240),
-    });
+    list.unshift({ ...row, createdAt: new Date().toISOString(), userAgent: row.user_agent });
     writeWaitlist(list);
     return res.status(201).json({ ok: true });
   } catch (e) {
